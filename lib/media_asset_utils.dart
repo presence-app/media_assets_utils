@@ -136,9 +136,8 @@ class MediaAssetUtils {
   }
 
   static Future<void> _methodCallHandler(MethodCall call) {
-    print(
-      "MediaAssetsUtils:onMethodCall(method: ${call.method}, arguments: ${call.arguments})",
-    );
+    //print(
+    //  "MediaAssetsUtils:onMethodCall(method: ${call.method}, arguments: ${call.arguments})",);
     final args = call.arguments;
     switch (call.method) {
       case 'onVideoCompressProgress':
