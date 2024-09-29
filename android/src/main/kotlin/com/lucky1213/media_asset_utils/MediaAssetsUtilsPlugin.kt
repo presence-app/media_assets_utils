@@ -64,6 +64,7 @@ class MediaAssetsUtilsPlugin: FlutterPlugin, MethodCallHandler {
       when (call.method) {
           "compressVideo" -> {
               val path = call.argument<String>("path")!!
+              val customBitRate = call.argument<Int>("customBitRate") ?: 5
               val quality = VideoOutputQuality.valueOf(call.argument<String>("quality")?.uppercase() ?: "MEDIUM")
               val tempPath = call.argument<String>("outputPath")
               val outputPath = tempPath ?: MediaStoreUtils.generateTempPath(applicationContext, DirectoryType.MOVIES.value, ".mp4")
@@ -150,7 +151,7 @@ class MediaAssetsUtilsPlugin: FlutterPlugin, MethodCallHandler {
                       // a file with a better size.
                       // NOTE: a formula was used before (width * height * 25 * 0.07).toInt() but it
                       // is unconventional and was generating wrong results.
-                      // videoBitrateInMbps = 5
+                      videoBitrateInMbps = customBitRate
                     ),
                 listener = object : CompressionListener {
                   override fun onProgress(index: Int, percent: Float) {

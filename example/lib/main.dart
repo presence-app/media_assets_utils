@@ -129,6 +129,8 @@ class _MyAppState extends State<MyApp> {
                   // COMPRESS WITH MEDIA ASSET UTILS
                   outputFile = await MediaAssetUtils.compressVideo(
                     file!,
+                    compressionPlugin: CompressionPlugin.ffmpeg,
+                    customBitRate: 5,
                     saveToLibrary: false, //true,
                     // high is 720p, very_high is 1080p
                     quality: VideoQuality.high, // VideoQuality.medium

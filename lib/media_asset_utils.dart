@@ -64,6 +64,7 @@ class MediaAssetUtils {
   static Future<File?> compressVideo(
     File file, {
     String? videoName,
+    int? customBitRate = 5,
     CompressionPlugin? compressionPlugin = CompressionPlugin.ffmpeg,
     bool saveToLibrary = false,
     VideoQuality quality = VideoQuality.very_low,
@@ -71,12 +72,12 @@ class MediaAssetUtils {
     ThumbnailConfig? thumbnailConfig,
   }) async {
     try {
+      var startTime = DateTime.timestamp();
       final directory = await getApplicationCacheDirectory();
       final dirPath = directory.path;
       String? outputPath = '${dirPath}/${basename(file.path)}';
 
       if (compressionPlugin == CompressionPlugin.ffmpeg) {
-        var startTime = DateTime.timestamp();
         print("outputPath ${outputPath}");
         final videoDuration = (await getVideoInfo(file)).duration!;
         print("duration ${videoDuration}");
@@ -128,17 +129,17 @@ class MediaAssetUtils {
             //print('Compress success');
             print('Time elapsed for compressing file with FFmpeg assets '
                 '${DateTime.timestamp().difference(startTime).inMilliseconds}ms');
-            print("Compression: initial File size: ${file.lengthSync()}");
-            print("Compression: compressed File size: ${File(outputPath).lengthSync()}");
+            print("Video Compression: initial File size: ${file.lengthSync()}");
+            print("Video Compression: compressed File size: ${File(outputPath).lengthSync()}");
             //SUCCESS
           } else if (ReturnCode.isCancel(returnCode)) {
-            print("compress cancelled");
+            print("Video Compression: compress cancelled");
             // CANCEL
           } else {
-            print('compress error');
+            print('Video Compression: compress error');
             FFmpegKitConfig.enableLogCallback((log) {
               final message = log.getMessage();
-              print(message);
+              print('Video Compression: log message: $message');
             });
             // ERROR
           }
@@ -149,7 +150,7 @@ class MediaAssetUtils {
           if (statistics.getTime() > 0) {
                dynamic progress = ((statistics.getTime() * 100) / videoDuration).ceil();
                _onVideoCompressProgress?.call(progress);
-               print('compression progress $progress');
+               print('Video Compression: progress $progress');
           }
         });
       }
@@ -162,11 +163,16 @@ class MediaAssetUtils {
           'videoName': videoName,
           'saveToLibrary': saveToLibrary,
           'quality': qstr.toUpperCase(),
+          'customBitrate': customBitRate,
           'storeThumbnail': thumbnailConfig != null,
           'thumbnailSaveToLibrary': thumbnailConfig?.saveToLibrary ?? false,
           'thumbnailPath': thumbnailConfig?.file?.path,
           'thumbnailQuality': thumbnailConfig?.quality ?? 100,
         });
+        print('Time elapsed for compressing file with FFmpeg assets '
+            '${DateTime.timestamp().difference(startTime).inMilliseconds}ms');
+        print("Compression: initial File size: ${file.lengthSync()}");
+        if (outputPath != null) print("Compression: compressed File size: ${File(outputPath).lengthSync()}");
         _onVideoCompressProgress = null;
         return outputPath == null ? null : File(outputPath);
       }
