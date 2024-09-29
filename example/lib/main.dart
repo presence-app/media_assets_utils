@@ -126,10 +126,10 @@ class _MyAppState extends State<MyApp> {
                   await initCompress(_, RequestType.video);
                   if (file == null) return;
                   print("COMPRESS FILE ${file!.path}");
-                  var startTime = DateTime.timestamp();
+                  // COMPRESS WITH MEDIA ASSET UTILS
                   outputFile = await MediaAssetUtils.compressVideo(
                     file!,
-                    saveToLibrary: false,
+                    saveToLibrary: false, //true,
                     // high is 720p, very_high is 1080p
                     quality: VideoQuality.high, // VideoQuality.medium
                     thumbnailConfig: ThumbnailConfig(),
@@ -138,11 +138,7 @@ class _MyAppState extends State<MyApp> {
                     },
                   );
                   setState(() {
-                    print("Initial file size: ${file!.lengthSync()}");
-                    print("Compressed file size: $outputFileSize");
-                    debugPrint('Time elapsed for compressing file '
-                        '${DateTime.timestamp().difference(startTime).inMilliseconds}ms');
-                    outputFileSize = outputFile!.lengthSync();
+                    if (outputFile != null) outputFileSize = outputFile!.lengthSync();
                   });
                 },
                 child: Text('Compress Video'),

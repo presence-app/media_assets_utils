@@ -128,6 +128,9 @@ class PermissionUtil {
         // 安卓中永久性拒绝申请，系统设置权限页面
         effectiveDelegate.openAppSettingsConfirmDialog(permission);
         break;
+      default:
+        allowed = true;
+        break;
     }
     return allowed;
   }
