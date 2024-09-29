@@ -124,16 +124,24 @@ class _MyAppState extends State<MyApp> {
               TextButton(
                 onPressed: () async {
                   await initCompress(_, RequestType.video);
+                  if (file == null) return;
+                  print("COMPRESS FILE ${file!.path}");
+                  var startTime = DateTime.timestamp();
                   outputFile = await MediaAssetUtils.compressVideo(
                     file!,
-                    saveToLibrary: true,
-                    quality: VideoQuality.very_low,
+                    saveToLibrary: false,
+                    // medium is 720p, high is 1080p
+                    quality: VideoQuality.medium, // VideoQuality.medium
                     thumbnailConfig: ThumbnailConfig(),
                     onVideoCompressProgress: (double progress) {
                       print(progress);
                     },
                   );
                   setState(() {
+                    print("Initial file size: ${file!.lengthSync()}");
+                    print("Compressed file size: $outputFileSize");
+                    debugPrint('Time elapsed for compressing file '
+                        '${DateTime.timestamp().difference(startTime).inMilliseconds}ms');
                     outputFileSize = outputFile!.lengthSync();
                   });
                 },
@@ -141,6 +149,7 @@ class _MyAppState extends State<MyApp> {
               ),
               TextButton(
                 onPressed: () async {
+                  if (file == null) return;
                   await initThumbnail(_);
                   outputFile = await MediaAssetUtils.getVideoThumbnail(
                     file!,
@@ -150,6 +159,7 @@ class _MyAppState extends State<MyApp> {
                   );
                   setState(() {
                     outputFileSize = outputFile!.lengthSync();
+                    print("Compressed file size: $outputFileSize");
                   });
                 },
                 child: Text('Get Video Thumbnail'),

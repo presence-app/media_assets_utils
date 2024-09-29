@@ -302,7 +302,7 @@ public struct LightCompressor {
         } else if quality == .medium {
             return Int(bitrate * 0.2)
         } else if quality == .high {
-            return Int(bitrate * 0.3)
+            return Int(bitrate * 0.28) // originally 0.3
         } else if quality == .very_high {
             return Int(bitrate * 0.5)
         } else {
@@ -356,6 +356,7 @@ public struct LightCompressor {
         ]
         
         var videoWriterSettings: [String : AnyObject] = [
+            AVVideoCodecKey : AVVideoCodecType.h264 as AnyObject,
             AVVideoCompressionPropertiesKey : videoWriterCompressionSettings as AnyObject,
             AVVideoWidthKey : width as AnyObject,
             AVVideoHeightKey : height as AnyObject
