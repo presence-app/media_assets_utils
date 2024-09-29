@@ -130,8 +130,8 @@ class _MyAppState extends State<MyApp> {
                   outputFile = await MediaAssetUtils.compressVideo(
                     file!,
                     saveToLibrary: false,
-                    // medium is 720p, high is 1080p
-                    quality: VideoQuality.medium, // VideoQuality.medium
+                    // high is 720p, very_high is 1080p
+                    quality: VideoQuality.high, // VideoQuality.medium
                     thumbnailConfig: ThumbnailConfig(),
                     onVideoCompressProgress: (double progress) {
                       print(progress);
