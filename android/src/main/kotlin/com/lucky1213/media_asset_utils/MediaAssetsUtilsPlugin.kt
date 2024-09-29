@@ -144,7 +144,13 @@ class MediaAssetsUtilsPlugin: FlutterPlugin, MethodCallHandler {
                       videoWidth = width.toDouble(),
                       videoHeight = height.toDouble(),
                       videoNames = listOf(outFile.nameWithoutExtension),
-                      videoBitrateInMbps = (width * height * 25 * 0.07).toInt()
+                      // Desire values are 5-12 Mbps in 1080p (Full HD) and 3-7 in 720p (HD)
+                      // The bigger, the better the quality. Since 5 generate a file bigger than
+                      // expected, we leave the field null, cause this default option generates
+                      // a file with a better size.
+                      // NOTE: a formula was used before (width * height * 25 * 0.07).toInt() but it
+                      // is unconventional and was generating wrong results.
+                      // videoBitrateInMbps = 5
                     ),
                 listener = object : CompressionListener {
                   override fun onProgress(index: Int, percent: Float) {
