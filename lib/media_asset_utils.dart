@@ -125,6 +125,9 @@ class MediaAssetUtils {
 
         FFmpegKit.executeAsync(command, (session) async {
           final returnCode = await session.getReturnCode();
+          // Print error stack
+          final failStackTrace = await session.getFailStackTrace();
+
           if (ReturnCode.isSuccess(returnCode)){
             //print('Compress success');
             print('Time elapsed for compressing file with FFmpeg assets '
@@ -137,6 +140,9 @@ class MediaAssetUtils {
             // CANCEL
           } else {
             print('Video Compression: compress error');
+            print('Video Compression: failStackTrace $failStackTrace');
+            final logs = await session.getLogs();
+            print('Video Compression: last ${logs.last.getMessage()}');
             FFmpegKitConfig.enableLogCallback((log) {
               final message = log.getMessage();
               print('Video Compression: log message: $message');
