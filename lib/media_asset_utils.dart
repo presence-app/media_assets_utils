@@ -142,7 +142,7 @@ class MediaAssetUtils {
             print('Video Compression: compress error');
             print('Video Compression: failStackTrace $failStackTrace');
             final logs = await session.getLogs();
-            print('Video Compression: last ${logs.last.getMessage()}');
+            print('Video Compression: last log message ${logs.last.getMessage()}');
             FFmpegKitConfig.enableLogCallback((log) {
               final message = log.getMessage();
               print('Video Compression: log message: $message');
