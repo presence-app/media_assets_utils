@@ -126,10 +126,12 @@ class _MyAppState extends State<MyApp> {
                   await initCompress(_, RequestType.video);
                   if (file == null) return;
                   print("COMPRESS FILE ${file!.path}");
-                  // COMPRESS WITH MEDIA ASSET UTILS
+                  // COMPRESS WITH LIGHTCOMPRESS OR FFMPEG
+                  // FFmpeg is faster but the decode cause issue on android playback
+                  // lightCompressor is very slow on android.
                   outputFile = await MediaAssetUtils.compressVideo(
                     file!,
-                    compressionPlugin: CompressionPlugin.ffmpeg,
+                    compressionPlugin: CompressionPlugin.lightCompressor, // lightCompressor or ffmpeg
                     customBitRate: 5,
                     saveToLibrary: false, //true,
                     // high is 720p, very_high is 1080p
