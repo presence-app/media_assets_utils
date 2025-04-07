@@ -26,7 +26,9 @@ dependencies:
   permission_handler: any
   wechat_assets_picker: ^9.0.2
   device_info_plus: ^10.0.1
-  ffmpeg_kit_flutter_min_gpl: 6.0.3
+  #ffmpeg_kit_flutter_min_gpl: 6.0.3
+  ffmpeg_kit_flutter_full_gpl:
+    git: https://github.com/presence-app/ffmpeg_kit_flutter_full_gpl.git
 
 dev_dependencies:
   flutter_test:
