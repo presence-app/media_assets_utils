@@ -2,11 +2,11 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:ffmpeg_kit_flutter_full_gpl/ffmpeg_kit.dart';
-import 'package:ffmpeg_kit_flutter_full_gpl/ffmpeg_kit_config.dart';
-import 'package:ffmpeg_kit_flutter_full_gpl/log.dart';
-import 'package:ffmpeg_kit_flutter_full_gpl/return_code.dart';
-import 'package:ffmpeg_kit_flutter_full_gpl/statistics.dart';
+import 'package:ffmpeg_kit_flutter/ffmpeg_kit.dart';
+import 'package:ffmpeg_kit_flutter/ffmpeg_kit_config.dart';
+import 'package:ffmpeg_kit_flutter/log.dart';
+import 'package:ffmpeg_kit_flutter/return_code.dart';
+import 'package:ffmpeg_kit_flutter/statistics.dart';
 import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart';
@@ -130,7 +130,7 @@ class MediaAssetUtils {
 
           if (ReturnCode.isSuccess(returnCode)){
             //print('Compress success');
-            print('Time elapsed for compressing file with FFmpeg assets '
+            print('Time elapsed for compressing file with FFmpeg '
                 '${DateTime.timestamp().difference(startTime).inMilliseconds}ms');
             print("Video Compression: initial File size: ${file.lengthSync()}");
             print("Video Compression: compressed File size: ${File(outputPath).lengthSync()}");
@@ -175,7 +175,7 @@ class MediaAssetUtils {
           'thumbnailPath': thumbnailConfig?.file?.path,
           'thumbnailQuality': thumbnailConfig?.quality ?? 100,
         });
-        print('Time elapsed for compressing file with FFmpeg assets '
+        print('Time elapsed for compressing file with lightCompressor '
             '${DateTime.timestamp().difference(startTime).inMilliseconds}ms');
         print("Compression: initial File size: ${file.lengthSync()}");
         if (outputPath != null) print("Compression: compressed File size: ${File(outputPath).lengthSync()}");
