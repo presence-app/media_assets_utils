@@ -131,7 +131,6 @@ class _MyAppState extends State<MyApp> {
                   // lightCompressor is very slow on android.
                   outputFile = await MediaAssetUtils.compressVideo(
                     file!,
-                    compressionPlugin: CompressionPlugin.lightCompressor, // lightCompressor or ffmpeg
                     customBitRate: 5,
                     saveToLibrary: false, //true,
                     // high is 720p, very_high is 1080p

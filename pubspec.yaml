@@ -2,7 +2,7 @@ publish_to: 'none'
 
 name: media_asset_utils
 description: Compress and save image/video native plugin (Swift/Kotlin).
-version: 0.1.8
+version: 0.1.9
 homepage: https://github.com/lucky1213/media_assets_utils
 
 environment:
@@ -12,20 +12,6 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-
-  #ffmpeg_kit_flutter_min_gpl: 6.0.3
-  ffmpeg_kit_flutter_full_gpl:
-    git: https://github.com/presence-app/ffmpeg_kit_flutter_full_gpl.git
-  #ffmpeg_kit_flutter:
-  #  git:
-  #    url: https://github.com/presence-app/ffmpeg-kit.git
-  #    path: flutter/flutter
-  #    ref: flutter_fix_retired_v6.0.3
-  #ffmpeg_kit_flutter:
-  #  git:
-  #    url: https://github.com/sth0409/ffmpeg-kit.git
-  #    path: flutter/flutter
-  #    ref: flutter_fix_retired_android_compileOnly_v6.0.3
 
   path_provider: ^2.0.2
   path: 1.9.0
