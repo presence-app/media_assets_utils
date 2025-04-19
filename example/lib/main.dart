@@ -134,7 +134,7 @@ class _MyAppState extends State<MyApp> {
                     customBitRate: 5,
                     saveToLibrary: false, //true,
                     // high is 720p, very_high is 1080p
-                    quality: VideoQuality.high, // VideoQuality.medium
+                    quality: VideoQuality.very_high, // VideoQuality.medium
                     thumbnailConfig: ThumbnailConfig(),
                     onVideoCompressProgress: (double progress) {
                       print(progress);

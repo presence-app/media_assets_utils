@@ -134,7 +134,8 @@ class MediaAssetsUtilsPlugin: FlutterPlugin, MethodCallHandler {
                   context = applicationContext, // => This is required
                   uris =  listOf(Uri.fromFile(file)),
                   isStreamable = false,
-                  appSpecificStorageConfiguration = AppSpecificStorageConfiguration(
+
+                  storageConfiguration = AppSpecificStorageConfiguration(
                       //  videoName = outFile.nameWithoutExtension,
                       // subFolderName = DirectoryType.MOVIES.value,
                   ),

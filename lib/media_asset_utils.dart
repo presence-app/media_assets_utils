@@ -67,7 +67,7 @@ class MediaAssetUtils {
         'videoName': videoName,
         'saveToLibrary': saveToLibrary,
         'quality': qstr.toUpperCase(),
-        'customBitrate': customBitRate,
+        'customBitRate': customBitRate,
         'storeThumbnail': thumbnailConfig != null,
         'thumbnailSaveToLibrary': thumbnailConfig?.saveToLibrary ?? false,
         'thumbnailPath': thumbnailConfig?.file?.path,

@@ -43,5 +43,5 @@ dependencies {
     implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.1'
     // implementation 'top.zibin:Luban:1.1.8'
     implementation 'com.github.Curzibn:Luban:1.1.8'
-    implementation 'com.github.AbedElazizShe:LightCompressor:1.3.2'
+    implementation 'com.github.AbedElazizShe:LightCompressor:1.3.3'
 }
