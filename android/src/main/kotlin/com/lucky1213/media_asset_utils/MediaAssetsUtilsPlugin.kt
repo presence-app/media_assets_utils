@@ -208,7 +208,7 @@ class MediaAssetsUtilsPlugin: FlutterPlugin, MethodCallHandler {
                       // Update UI with progress value
                       Handler(Looper.getMainLooper()).post {
                           Log.i("MediaAssetsUtils - onVideoCompressProgress", percent.toString())
-                          channel.invokeMethod("MediaAssetsUtils - onVideoCompressProgress", if (percent > 100) { 100 } else { percent})
+                          channel.invokeMethod("onVideoCompressProgress", if (percent > 100) { 100 } else { percent})
                       }
                   }
 
