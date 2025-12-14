@@ -76,8 +76,9 @@ class MediaAssetsUtilsPlugin: FlutterPlugin, MethodCallHandler {
               val thumbnailSaveToLibrary = call.argument<Boolean>("thumbnailSaveToLibrary") ?: false
               val thumbnailPath = call.argument<String>("thumbnailPath")
               val thumbnailQuality = call.argument<Int>("thumbnailQuality") ?: 100
-              // 文件小于1M
-              if (file.length() < 1048576) {
+              // Skip files smaller than 5MB
+              if (file.length() < 5242880) {
+                  Log.i("MediaAssetsUtils - Video Compress", "File size (${file.length()}) < 5MB, returning original")
                   result.success(path)
                   return
               }
@@ -85,7 +86,7 @@ class MediaAssetsUtilsPlugin: FlutterPlugin, MethodCallHandler {
               try {
                   mediaMetadataRetriever.setDataSource(path)
               } catch (e: IllegalArgumentException) {
-                  result.error("VideoCompress", e.message, null)
+                  result.error("MediaAssetsUtils - VideoCompress", e.message, null)
                   return
               }
 
@@ -93,16 +94,25 @@ class MediaAssetsUtilsPlugin: FlutterPlugin, MethodCallHandler {
               var width = mediaMetadataRetriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toInt()
               var height = mediaMetadataRetriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toInt()
               if (bitrate == null || width == null || height == null) {
-                  result.error("VideoCompress", "Cannot find video track.", null)
+                  result.error("MediaAssetsUtils - VideoCompress", "Cannot find video track.", null)
                   return
-              } else {
-                  // 码率小于164kb/s
-                  if (bitrate < 1351680) {
-                      result.success(path)
-                      return
-                  }
-                  Log.i("BITRATE", bitrate.toString())
               }
+
+              val fileSize = file.length()
+              val fileSizeInMB = fileSize / 1048576.0
+
+              Log.i("MediaAssetsUtils - Video Compress", "Input: ${fileSizeInMB}MB, ${width}x${height}, ${bitrate}bps")
+
+              // Skip very small files - already optimized
+              if (fileSizeInMB < 5) {
+                  Log.i("MediaAssetsUtils - Video Compress", "File < 5MB, returning original")
+                  result.success(path)
+                  return
+              }
+
+              // Calculate output dimensions
+              val originalWidth = width
+              val originalHeight = height
               when {
                   width >= quality.value || height >= quality.value -> {
                       when {
@@ -122,14 +132,21 @@ class MediaAssetsUtilsPlugin: FlutterPlugin, MethodCallHandler {
                   }
               }
 
+              // Calculate safe bitrate based on OUTPUT dimensions
+              // Use conservative formula: bitrate (Mbps) = (width * height * fps * 0.07) / 1,000,000
+              // Assume 30 fps, simplified: (pixels * 2.1) / 1,000,000, capped at customBitRate
+              val outputPixels = width * height
+              val calculatedBitrate = ((outputPixels * 2.1) / 1_000_000).toInt().coerceIn(2, customBitRate)
+
+              Log.i("MediaAssetsUtils - Video Compress", "Output: ${width}x${height}, using ${calculatedBitrate}Mbps")
+
               mediaMetadataRetriever.release()
 
               if (!outFile.parentFile!!.exists()) {
                   outFile.parentFile!!.mkdirs()
               }
 
-              Log.i("outFile", outFile.path)
-              Log.i("OutputSize", "width=$width, height=$height")
+              Log.i("MediaAssetsUtils - outFile", outFile.path)
               VideoCompressor.start(
                   context = applicationContext, // => This is required
                   uris =  listOf(Uri.fromFile(file)),
@@ -141,25 +158,20 @@ class MediaAssetsUtilsPlugin: FlutterPlugin, MethodCallHandler {
                   ),
                   configureWith = Configuration(
                       quality = quality.level,
-                      isMinBitrateCheckEnabled = true,
+                      isMinBitrateCheckEnabled = false, // Disable library check - we handle bitrate ourselves
                       keepOriginalResolution = false,
                       videoWidth = width.toDouble(),
                       videoHeight = height.toDouble(),
                       videoNames = listOf(outFile.nameWithoutExtension),
-                      // Desire values are 5-12 Mbps in 1080p (Full HD) and 3-7 in 720p (HD)
-                      // The bigger, the better the quality. Since 5 generate a file bigger than
-                      // expected, we leave the field null, cause this default option generates
-                      // a file with a better size.
-                      // NOTE: a formula was used before (width * height * 25 * 0.07).toInt() but it
-                      // is unconventional and was generating wrong results.
-                      videoBitrateInMbps = customBitRate
+                      // Use our calculated safe bitrate based on output dimensions
+                      videoBitrateInMbps = calculatedBitrate
                     ),
                 listener = object : CompressionListener {
                   override fun onProgress(index: Int, percent: Float) {
                       // Update UI with progress value
                       Handler(Looper.getMainLooper()).post {
-                          Log.i("onVideoCompressProgress", percent.toString())
-                          channel.invokeMethod("onVideoCompressProgress", if (percent > 100) { 100 } else { percent})
+                          Log.i("MediaAssetsUtils - onVideoCompressProgress", percent.toString())
+                          channel.invokeMethod("MediaAssetsUtils - onVideoCompressProgress", if (percent > 100) { 100 } else { percent})
                       }
                   }
 
@@ -192,12 +204,12 @@ class MediaAssetsUtilsPlugin: FlutterPlugin, MethodCallHandler {
                   }
 
                   override fun onFailure(index: Int, failureMessage: String) {
-                      result.error("VideoCompress", failureMessage, null)
+                      result.error("MediaAssetsUtils - VideoCompress", failureMessage, null)
                   }
 
                   override fun onCancelled(index: Int) {
                       Handler(Looper.getMainLooper()).post {
-                          result.error("VideoCompress", "The transcoding operation was canceled.", null)
+                          result.error("MediaAssetsUtils - VideoCompress", "The transcoding operation was canceled.", null)
                       }
                   }
 
