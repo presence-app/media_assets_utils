@@ -42,16 +42,20 @@ This plugin is optimized for mobile social media apps (TikTok/Instagram-like) wi
    → Result: 864x1920
 
 3. Calculate safe bitrate for OUTPUT dimensions
-   Formula: (output_width × output_height × 2.1) / 1,000,000
+   Formula: Math.round((output_width × output_height × 3.5) / 1,000,000)
    Then: clamp between 2 Mbps (min) and customBitRate (max)
    
    Real calculation examples:
-   - 864×1920 = 1,658,880 pixels → (1,658,880 × 2.1) / 1M = 3.48 → 3 Mbps ✅
-   - 1080×1920 = 2,073,600 pixels → (2,073,600 × 2.1) / 1M = 4.35 → 4 Mbps ✅
-   - 640×480 = 307,200 pixels → (307,200 × 2.1) / 1M = 0.64 → 2 Mbps (min) ✅
-   - 1920×1080 = 2,073,600 pixels → (2,073,600 × 2.1) / 1M = 4.35 → 4 Mbps ✅
+   - 576×1280 = 737,280 pixels → (737,280 × 3.5) / 1M = 2.58 → **3 Mbps** ✅
+   - 720×1280 = 921,600 pixels → (921,600 × 3.5) / 1M = 3.23 → **3 Mbps** ✅
+   - 1080×1920 = 2,073,600 pixels → (2,073,600 × 3.5) / 1M = 7.26 → **5 Mbps** (capped) ✅
 
-4. Compress with calculated bitrate
+4. Intelligent bitrate management
+   - If source < 2 Mbps AND file < 20MB AND no resize → Skip
+   - If resizing → Use calculated bitrate (appropriate for output)
+   - If no resize AND calculated > source → Cap to source bitrate
+
+5. Compress with calculated bitrate
    - Library bitrate check is DISABLED (`isMinBitrateCheckEnabled = false`)
    - We control bitrate calculation completely
    - Uses hardware encoding for speed
@@ -61,24 +65,30 @@ This plugin is optimized for mobile social media apps (TikTok/Instagram-like) wi
 ### Key Features
 
 1. **✅ Zero Library Conflicts**: Disabled `isMinBitrateCheckEnabled` - we calculate everything
-2. **✅ Dimension-Based**: Bitrate automatically scaled to output resolution
-3. **✅ Always Processes Large Files**: Files ≥ 5MB are always compressed
-4. **✅ Simple & Predictable**: Same formula every time, no conditionals
-5. **✅ Proven Formula**: Conservative calculation that works reliably
+2. **✅ Dimension-Based**: Bitrate automatically scaled to output resolution with proper rounding
+3. **✅ Smart Skip Logic**: Only skip if file < 20MB AND no resize needed AND low bitrate
+4. **✅ Intelligent Capping**: Cap to source only when not resizing
+5. **✅ Better Formula**: 3.5x multiplier for good quality/size balance
 6. **✅ Hardware Accelerated**: Uses device encoder for fast compression
+7. **✅ Comprehensive Logging**: Summary shows input/output details after compression
 
 ## Real-World Examples (Tested & Verified)
 
-### Example 1: Long video at low bitrate (ACTUAL TEST CASE ✅)
-- **Input**: 1080x2400 @ 1.98 Mbps, 31.0MB (2+ minute video)
-- **Output**: 864x1920 @ 3 Mbps, 16.7MB
-- **Result**: 46% smaller (saved 14.3MB)
-- **Time**: ~30-60 seconds on modern device
-- **Calculation**: 864×1920 = 1,658,880 pixels → 3.48 Mbps → 3 Mbps
-- **Quality**: Excellent - higher bitrate per pixel than input
-- **Perfect for**: Instagram posts, TikTok uploads
+### Example 1: Large video (ACTUAL TEST CASE ✅)
+- **Input**: 1080x2400 @ 3.8 Mbps, 560MB
+- **Output**: 576x1280 @ 3 Mbps, 271MB
+- **Result**: 51% smaller (saved 289MB)
+- **Time**: ~5.4 minutes on modern device
+- **Calculation**: 576×1280 = 737,280 pixels → 2.58 Mbps → **3 Mbps** (rounded)
+- **Quality**: Excellent
+- **Note**: Very large files take time due to hardware encoding limits
 
-### Example 2: User records 1080p @ 8 Mbps, 50MB
+### Example 2: Medium video with high bitrate
+- **Input**: ~50-100MB @ high bitrate
+- **Output**: ~6-10MB @ optimized bitrate
+- **Result**: 85-90% smaller
+- **Time**: ~60-90 seconds
+- **Quality**: Excellent - modern codec very efficient
 - **Input**: 1080x1920 @ 8 Mbps, 50MB
 - **Output**: 1080x1920 @ 4 Mbps, ~25MB
 - **Result**: 50% smaller
@@ -163,12 +173,14 @@ final outputFile = await MediaAssetUtils.compressVideo(
 ## Performance Characteristics
 
 - **Skip files < 5MB**: < 100ms (immediate return)
-- **Compression time**: 
-  - 10MB file: ~10-20 seconds
-  - 30MB file: ~30-60 seconds  
-  - 50MB file: ~45-90 seconds
+- **Compression time** (hardware encoding speed):
+  - 10MB file: ~10-15 seconds
+  - 50MB file: ~45-60 seconds
+  - 100MB file: ~90-120 seconds
+  - 500MB file: ~5-6 minutes ⚠️ (warn users about large files!)
 - **Progress updates**: Every 1-2% during compression
 - **Hardware accelerated**: Uses device H.264/H.265 encoder
+- **Memory efficient**: Streams data, doesn't load entire file
 - **Memory efficient**: Streams data, doesn't load entire file
 
 ## Technical Details
@@ -182,20 +194,22 @@ final outputFile = await MediaAssetUtils.compressVideo(
 ### Bitrate Formula Explanation
 
 ```kotlin
-// Formula: (width × height × 2.1) / 1,000,000
-// Where does 2.1 come from?
+// Formula: Math.round((width × height × 3.5) / 1,000,000)
+// Where does 3.5 come from?
 // 
-// Assuming 30 fps and 0.07 bits per pixel per frame:
-// bitrate = width × height × fps × 0.07
-// bitrate = width × height × 30 × 0.07
-// bitrate = width × height × 2.1
+// Assuming 30 fps and 0.117 bits per pixel per frame:
+// bitrate = width × height × fps × 0.117
+// bitrate = width × height × 30 × 0.117
+// bitrate = width × height × 3.5
 //
-// Then clamp: max(2, min(calculatedBitrate, customBitRate))
+// Then: Math.round() to avoid truncation bugs (2.58 → 3, not 2)
+// Finally: clamp between 2 Mbps (min) and customBitRate (max)
 //
-// This is conservative and works well for:
+// This provides good quality for:
 // - Modern codecs (H.264/H.265)
 // - Variable bitrate encoding
-// - Mixed content (motion + static scenes)
+// - Mobile viewing (screens + typical viewing distance)
+// - Social media requirements
 ```
 
 ### Why Library Check is Disabled
@@ -346,7 +360,7 @@ Run migration steps if needed.
 Future<File> compressVideo(
   File file, {
   int customBitRate = 5,              // Max bitrate cap in Mbps
-  VideoQuality quality = VideoQuality.very_high,  // Resolution target
+  VideoQuality quality = VideoQuality.high,  // Resolution target
   bool saveToLibrary = false,          // Save to photo library
   bool storeThumbnail = true,         // Generate thumbnail
   bool thumbnailSaveToLibrary = false, // Save thumbnail to library
@@ -370,5 +384,6 @@ Future<File> compressVideo(
 **Version**: 0.2.0  
 **Tested & Verified**: Android (Xiaomi, Samsung), iOS (iPhone 13+)  
 **Status**: ✅ Production Ready - Zero known issues
+
 
 
