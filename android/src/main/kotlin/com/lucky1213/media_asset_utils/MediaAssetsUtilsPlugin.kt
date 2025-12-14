@@ -66,6 +66,7 @@ class MediaAssetsUtilsPlugin: FlutterPlugin, MethodCallHandler {
               val path = call.argument<String>("path")!!
               val customBitRate = call.argument<Int>("customBitRate") ?: 5
               val quality = VideoOutputQuality.valueOf(call.argument<String>("quality")?.uppercase() ?: "MEDIUM")
+              Log.i("MediaAssetsUtils - Video Compress", "🔧 Parameters: customBitRate=${customBitRate}Mbps, quality=${quality.name}")
               val tempPath = call.argument<String>("outputPath")
               val outputPath = tempPath ?: MediaStoreUtils.generateTempPath(applicationContext, DirectoryType.MOVIES.value, ".mp4")
               val outFile = File(outputPath)
@@ -113,6 +114,8 @@ class MediaAssetsUtilsPlugin: FlutterPlugin, MethodCallHandler {
               // Calculate output dimensions
               val originalWidth = width
               val originalHeight = height
+              val needsResize = width >= quality.value || height >= quality.value
+
               when {
                   width >= quality.value || height >= quality.value -> {
                       when {
@@ -133,12 +136,46 @@ class MediaAssetsUtilsPlugin: FlutterPlugin, MethodCallHandler {
               }
 
               // Calculate safe bitrate based on OUTPUT dimensions
-              // Use conservative formula: bitrate (Mbps) = (width * height * fps * 0.07) / 1,000,000
-              // Assume 30 fps, simplified: (pixels * 2.1) / 1,000,000, capped at customBitRate
+              // Formula: (pixels × 3.5) / 1M for better quality (was 2.1, too aggressive)
+              // This gives: 720p=3.2Mbps, 1080p=7.2Mbps (but capped at customBitRate default 5Mbps)
               val outputPixels = width * height
-              val calculatedBitrate = ((outputPixels * 2.1) / 1_000_000).toInt().coerceIn(2, customBitRate)
+              var calculatedBitrate = Math.round((outputPixels * 3.5) / 1_000_000).toInt().coerceIn(2, customBitRate)
 
-              Log.i("MediaAssetsUtils - Video Compress", "Output: ${width}x${height}, using ${calculatedBitrate}Mbps")
+              Log.i("MediaAssetsUtils - Video Compress", "Bitrate calculation: pixels=${outputPixels}, formula=${(outputPixels * 3.5 / 1_000_000)}, calculated=${calculatedBitrate}Mbps")
+
+              // CRITICAL: Intelligent bitrate management
+              val sourceBitrateMbps = bitrate / 1_000_000.0  // Keep as double to avoid truncation!
+              Log.i("MediaAssetsUtils - Video Compress", "Source bitrate: ${bitrate}bps = ${sourceBitrateMbps}Mbps, needsResize=${needsResize}")
+
+              // Decision logic
+              if (sourceBitrateMbps < 2.0) {
+                  // Very low source bitrate (< 2 Mbps)
+                  if (!needsResize && fileSizeInMB < 20) {
+                      // Small file, no resize, low bitrate - skip entirely
+                      Log.i("MediaAssetsUtils - Video Compress", "⚠️ SKIPPING: Source ${sourceBitrateMbps}Mbps < 2 Mbps, ${fileSizeInMB}MB file, no resize needed - returning original")
+                      mediaMetadataRetriever.release()
+                      result.success(path)
+                      return
+                  } else {
+                      // Needs resize or large file - use calculated bitrate (minimum 2 Mbps)
+                      Log.i("MediaAssetsUtils - Video Compress", "✓ LOW SOURCE BITRATE: ${sourceBitrateMbps}Mbps, ${originalWidth}x${originalHeight}→${width}x${height}, using calculated ${calculatedBitrate}Mbps")
+                  }
+              } else if (needsResize) {
+                  // Resizing - always use calculated bitrate based on OUTPUT dimensions
+                  // Don't cap to source - smaller dimensions need appropriate bitrate
+                  Log.i("MediaAssetsUtils - Video Compress", "✓ RESIZING: ${originalWidth}x${originalHeight}→${width}x${height}, source ${sourceBitrateMbps}Mbps, using calculated ${calculatedBitrate}Mbps for output")
+              } else {
+                  // No resize - cap to source bitrate to avoid making file larger
+                  if (calculatedBitrate > sourceBitrateMbps) {
+                      val cappedBitrate = Math.round(sourceBitrateMbps).toInt().coerceAtLeast(2)
+                      Log.i("MediaAssetsUtils - Video Compress", "⚠️ CAPPING: No resize, calculated (${calculatedBitrate}Mbps) > source (${sourceBitrateMbps}Mbps), using ${cappedBitrate}Mbps")
+                      calculatedBitrate = cappedBitrate
+                  } else {
+                      Log.i("MediaAssetsUtils - Video Compress", "✓ NO RESIZE: Using calculated ${calculatedBitrate}Mbps (source was ${sourceBitrateMbps}Mbps)")
+                  }
+              }
+
+              Log.i("MediaAssetsUtils - Video Compress", "✅ FINAL: Output ${width}x${height} @ ${calculatedBitrate}Mbps, estimated time: ${(fileSizeInMB * 0.8).toInt()}-${(fileSizeInMB * 1.2).toInt()}s")
 
               mediaMetadataRetriever.release()
 
@@ -185,6 +222,21 @@ class MediaAssetsUtilsPlugin: FlutterPlugin, MethodCallHandler {
                           try {
                               val tempFile = File(path!!)
                               copyFile(tempFile, outFile)
+
+                              // Calculate compression statistics
+                              val inputSizeMB = file.length() / 1048576.0
+                              val outputSizeMB = outFile.length() / 1048576.0
+                              val reduction = ((inputSizeMB - outputSizeMB) / inputSizeMB * 100)
+                              val compressionTime = (System.currentTimeMillis() - 0) / 1000.0 // Approximate
+
+                              // Log comprehensive summary
+                              Log.i("MediaAssetsUtils - COMPRESSION SUMMARY", "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+                              Log.i("MediaAssetsUtils - COMPRESSION SUMMARY", "Input:  ${inputSizeMB.toInt()}MB @ ${bitrate}bps (${originalWidth}x${originalHeight})")
+                              Log.i("MediaAssetsUtils - COMPRESSION SUMMARY", "Output: ${outputSizeMB.toInt()}MB @ ${calculatedBitrate}Mbps (${width}x${height})")
+                              Log.i("MediaAssetsUtils - COMPRESSION SUMMARY", "Reduction: ${reduction.toInt()}% (saved ${(inputSizeMB - outputSizeMB).toInt()}MB)")
+                              Log.i("MediaAssetsUtils - COMPRESSION SUMMARY", "Quality: ${quality.name}, Bitrate formula: 3.5x")
+                              Log.i("MediaAssetsUtils - COMPRESSION SUMMARY", "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+
                               if (storeThumbnail) {
                                   storeThumbnailToFile(outputPath, thumbnailPath, thumbnailQuality, thumbnailSaveToLibrary)
                               }
