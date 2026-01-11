@@ -37,7 +37,10 @@ public class SwiftMediaAssetsUtilsPlugin: NSObject, FlutterPlugin {
     
     private var channel: FlutterMethodChannel
     private var compressor: LightCompressor
-    private var compression: Compression? = nil
+    
+    // Track multiple concurrent compressions
+    private var compressions: [String: Compression] = [:]
+    
     fileprivate var library: PHPhotoLibrary
     
     init(with registrar: FlutterPluginRegistrar) {
@@ -62,21 +65,28 @@ public class SwiftMediaAssetsUtilsPlugin: NSObject, FlutterPlugin {
             let path: String = dict!.value(forKey: "path") as! String
             let outputPath: String = dict?.value(forKey: "outputPath") as? String ?? generatePath(type: DirectoryType.movies)
             let quality = VideoQuality.withLabel((dict?.value(forKey: "quality") as? String)?.lowercased() ?? "medium") ?? VideoQuality.medium
+            let compressionId: String = dict?.value(forKey: "compressionId") as? String ?? UUID().uuidString
             
             let saveToLibrary: Bool = dict!.value(forKey: "saveToLibrary") as? Bool ?? false
             let storeThumbnail: Bool = dict!.value(forKey: "storeThumbnail") as? Bool ?? true
             let thumbnailPath: String? = dict!.value(forKey: "thumbnailPath") as? String
             let thumbnailQuality: CGFloat = CGFloat(dict!.value(forKey: "thumbnailQuality") as! Int ) / 100
             
-            compressVideo(path, outputPath: outputPath, quality: quality) { compressionResult in
+            compressVideo(path, outputPath: outputPath, quality: quality, compressionId: compressionId) { [weak self] compressionResult in
+                // Check if this compression still exists (wasn't cancelled)
+                guard self?.compressions[compressionId] != nil else {
+                    result(FlutterError(code: "VideoCompress", message: "The transcoding operation was canceled.", details: nil))
+                    return
+                }
+                
                 switch compressionResult {
                 case .onSuccess(let url):
                     if (storeThumbnail) {
-                        let _ = self.storeThumbnailToFile(url: url, thumbnailPath: thumbnailPath, quality: thumbnailQuality, saveToLibrary: false)
+                        let _ = self?.storeThumbnailToFile(url: url, thumbnailPath: thumbnailPath, quality: thumbnailQuality, saveToLibrary: false)
                     }
                     result(url.path)
                     if (saveToLibrary) {
-                        self.library.save(videoAtURL: url)
+                        self?.library.save(videoAtURL: url)
                     }
                     
                 case .onStart: break
@@ -85,8 +95,19 @@ public class SwiftMediaAssetsUtilsPlugin: NSObject, FlutterPlugin {
                     result(FlutterError(code: "VideoCompress", message: error.errorDescription, details: nil))
                     
                 case .onCancelled:
+                    // Clean up temporary files when cancelled
+                    do {
+                        if FileManager.default.fileExists(atPath: outputPath) {
+                            try FileManager.default.removeItem(atPath: outputPath)
+                        }
+                    } catch {
+                        print("Failed to remove temporary file: \(error)")
+                    }
                     result(FlutterError(code: "VideoCompress", message: "The transcoding operation was canceled.", details: nil))
                 }
+                
+                // Clean up the compression reference
+                self?.compressions.removeValue(forKey: compressionId)
             }
         case "compressImage":
             let path: String = dict!.value(forKey: "path") as! String
@@ -214,16 +235,15 @@ public class SwiftMediaAssetsUtilsPlugin: NSObject, FlutterPlugin {
           let path: String = dict!.value(forKey: "path") as! String
           saveFileToGallery(path)
           result(true)
-        case "saveImageToGallery":
-            guard let imageData = (dict!["data"] as? FlutterStandardTypedData)?.data,
-                        let image = UIImage(data: imageData)
-                        else { return }
-            guard let path = image.storeImageToFile(generatePath(type: DirectoryType.pictures)) else {
+        case "cancelVideoCompression":
+            let compressionId: String = dict?.value(forKey: "compressionId") as? String ?? ""
+            if let compression = compressions[compressionId] {
+                compression.cancel = true
+                compressions.removeValue(forKey: compressionId)
+                result(true)
+            } else {
                 result(false)
-                return
             }
-          saveFileToGallery(path)
-          result(true)
         default:
             result(FlutterError(code: "NoImplemented", message: "Handles a call to an unimplemented method.", details: nil))
         }
@@ -295,16 +315,12 @@ public class SwiftMediaAssetsUtilsPlugin: NSObject, FlutterPlugin {
         }
     }
     
-    private func compressVideo(_ path: String, outputPath: String, quality: VideoQuality = VideoQuality.medium, completion: @escaping (CompressionResult) -> ()) -> Void {
+    private func compressVideo(_ path: String, outputPath: String, quality: VideoQuality = VideoQuality.medium, compressionId: String, completion: @escaping (CompressionResult) -> ()) -> Void {
         let source = URL(fileURLWithPath: path)
         let destination = URL(fileURLWithPath: outputPath)
         createDirectory(destination.deletingLastPathComponent())
         
         let asset = AVURLAsset(url: source)
-        //        loadTracks(asset: asset) {
-        //            status in
-        //
-        //        }
         guard let videoTrack = asset.tracks(withMediaType: AVMediaType.video).first else {
             completion(.onFailure(CompressionError(title: "Cannot find video track.")))
             return
@@ -339,14 +355,25 @@ public class SwiftMediaAssetsUtilsPlugin: NSObject, FlutterPlugin {
             }
         }
         
-        self.compression = self.compressor.compressVideo(source: source, destination: destination, progressQueue: .main, progressHandler: { progress in
-            DispatchQueue.main.async { [unowned self] in
+        // Store the compression operation for this compression ID
+        let compression = self.compressor.compressVideo(source: source, destination: destination, progressQueue: .main, progressHandler: { [weak self] progress in
+            DispatchQueue.main.async {
                 let v = Float(progress.fractionCompleted * 100)
-                channel.invokeMethod("onVideoCompressProgress", arguments: v > 100 ? 100 : v)
+                self?.channel.invokeMethod("onVideoCompressProgress", arguments: [
+                    "compressionId": compressionId,
+                    "progress": v > 100 ? 100 : v
+                ])
             }
         }, configuration: Configuration(
             quality: quality, isMinBitRateEnabled: false, keepOriginalResolution: false, videoHeight: Int(height), videoWidth: Int(width), videoBitrate: Int(width * height * 25 * 0.07)
-        ), completion: completion)
+        ), completion: { [weak self] result in
+            // Clean up compression reference after completion
+            self?.compressions.removeValue(forKey: compressionId)
+            completion(result)
+        })
+        
+        // Store the compression object
+        compressions[compressionId] = compression
         
     }
     
