@@ -110,22 +110,47 @@ class MediaAssetsUtilsPlugin: FlutterPlugin, MethodCallHandler {
               val fileSize = file.length()
               val fileSizeInMB = fileSize / 1048576.0
 
-              Log.i("MediaAssetsUtils - Video Compress", "Input: ${fileSizeInMB}MB, ${width}x${height}, ${bitrate}bps")
+              Log.i("MediaAssetsUtils - Video Compress", " INPUT FILE INFO:")
+              Log.i("MediaAssetsUtils - Video Compress", "  Size: ${fileSizeInMB.toInt()}MB (${fileSizeInMB}MB)")
+              Log.i("MediaAssetsUtils - Video Compress", "  Dimensions: ${width}x${height}")
+              Log.i("MediaAssetsUtils - Video Compress", "  Bitrate: ${bitrate}bps")
+              Log.i("MediaAssetsUtils - Video Compress", "  Target Quality: ${quality.name} (max side: ${quality.value}px)")
+              Log.i("MediaAssetsUtils - Video Compress", "  Custom Bitrate Cap: ${customBitRate}Mbps")
 
               // Skip very small files - already optimized
               if (fileSizeInMB < 5) {
-                  Log.i("MediaAssetsUtils - Video Compress", "File < 5MB, returning original")
+                  Log.i("MediaAssetsUtils - Video Compress", "SKIP: File size ${fileSizeInMB.toInt()}MB < 5MB threshold - returning original")
                   result.success(path)
                   return
+              }
+
+              // Check file extension - always compress if not MP4 compatible format
+              val fileExtension = file.extension.lowercase()
+              val mp4CompatibleFormats = setOf("mp4", "m4v")
+              val isMP4Compatible = fileExtension in mp4CompatibleFormats
+              
+              if (!isMP4Compatible) {
+                  Log.i("MediaAssetsUtils - Video Compress", "")
+                  Log.i("MediaAssetsUtils - Video Compress", "FILE FORMAT CHECK:")
+                  Log.i("MediaAssetsUtils - Video Compress", "  Current format: .${fileExtension} (not MP4 compatible)")
+                  Log.i("MediaAssetsUtils - Video Compress", "  Compatible formats: ${mp4CompatibleFormats.joinToString(", ") { ".$it" }}")
+                  Log.i("MediaAssetsUtils - Video Compress", "")
+                  Log.i("MediaAssetsUtils - Video Compress", "DECISION: COMPRESS (format conversion)")
+                  Log.i("MediaAssetsUtils - Video Compress", "  Reason: Video must be converted to MP4 for player compatibility")
+                  Log.i("MediaAssetsUtils - Video Compress", "  → Will output as MP4 format")
+              } else {
+                  Log.i("MediaAssetsUtils - Video Compress", "")
+                  Log.i("MediaAssetsUtils - Video Compress", "FILE FORMAT CHECK:")
+                  Log.i("MediaAssetsUtils - Video Compress", "  Current format: .${fileExtension} (MP4 compatible ✓)")
               }
 
               // Calculate output dimensions
               val originalWidth = width
               val originalHeight = height
-              val needsResize = width >= quality.value || height >= quality.value
+              val needsResize = width > quality.value || height > quality.value
 
               when {
-                  width >= quality.value || height >= quality.value -> {
+                  width > quality.value || height > quality.value -> {
                       when {
                           width > height -> {
                               height = ceil(height * quality.value / width.toDouble()).toInt()
@@ -149,41 +174,86 @@ class MediaAssetsUtilsPlugin: FlutterPlugin, MethodCallHandler {
               val outputPixels = width * height
               var calculatedBitrate = Math.round((outputPixels * 3.5) / 1_000_000).toInt().coerceIn(2, customBitRate)
 
-              Log.i("MediaAssetsUtils - Video Compress", "Bitrate calculation: pixels=${outputPixels}, formula=${(outputPixels * 3.5 / 1_000_000)}, calculated=${calculatedBitrate}Mbps")
+              Log.i("MediaAssetsUtils - Video Compress", "BITRATE CALCULATION:")
+              Log.i("MediaAssetsUtils - Video Compress", "  Output size: ${width}x${height} (${outputPixels} pixels)")
+              Log.i("MediaAssetsUtils - Video Compress", "  Formula: (${outputPixels} × 3.5) / 1,000,000 = ${(outputPixels * 3.5 / 1_000_000).toInt()}Mbps")
+              Log.i("MediaAssetsUtils - Video Compress", "  Calculated bitrate: ${calculatedBitrate}Mbps (capped to custom: ${customBitRate}Mbps)")
 
               // CRITICAL: Intelligent bitrate management
               val sourceBitrateMbps = bitrate / 1_000_000.0  // Keep as double to avoid truncation!
-              Log.i("MediaAssetsUtils - Video Compress", "Source bitrate: ${bitrate}bps = ${sourceBitrateMbps}Mbps, needsResize=${needsResize}")
+              Log.i("MediaAssetsUtils - Video Compress", "")
+              Log.i("MediaAssetsUtils - Video Compress", "COMPRESSION DECISION LOGIC:")
+              Log.i("MediaAssetsUtils - Video Compress", "  Source bitrate: ${String.format("%.2f", sourceBitrateMbps)}Mbps")
+              Log.i("MediaAssetsUtils - Video Compress", "  Resize needed: $needsResize (current ${originalWidth}x${originalHeight} vs quality max ${quality.value}px)")
+              Log.i("MediaAssetsUtils - Video Compress", "  File size: ${fileSizeInMB.toInt()}MB")
 
-              // Decision logic
-              if (sourceBitrateMbps < 2.0) {
-                  // Very low source bitrate (< 2 Mbps)
-                  if (!needsResize && fileSizeInMB < 20) {
-                      // Small file, no resize, low bitrate - skip entirely
-                      Log.i("MediaAssetsUtils - Video Compress", "⚠️ SKIPPING: Source ${sourceBitrateMbps}Mbps < 2 Mbps, ${fileSizeInMB}MB file, no resize needed - returning original")
+              // Decision logic: Compress only if bitrate is HIGH (file is large/heavy)
+              if (!isMP4Compatible) {
+                  // Non-MP4 format - always compress for format conversion
+                  // Continue to compression (don't return early)
+              } else if (sourceBitrateMbps < 2.0 && !needsResize) {
+                  // Very low source bitrate AND no resize needed - skip compression
+                  // File is already optimized, no point compressing further
+                  Log.i("MediaAssetsUtils - Video Compress", "")
+                  Log.i("MediaAssetsUtils - Video Compress", "❌ DECISION: SKIP COMPRESSION")
+                  Log.i("MediaAssetsUtils - Video Compress", "  Reasons:")
+                  Log.i("MediaAssetsUtils - Video Compress", "    • Source bitrate is very low: ${String.format("%.2f", sourceBitrateMbps)}Mbps < 2Mbps")
+                  Log.i("MediaAssetsUtils - Video Compress", "    • No resize needed: ${originalWidth}x${originalHeight} fits quality limit")
+                  Log.i("MediaAssetsUtils - Video Compress", "  → File already optimized, returning original")
+                  mediaMetadataRetriever.release()
+                  result.success(path)
+                  return
+              } else if (needsResize) {
+                  // Resize required - but only compress if bitrate is HIGH enough to justify re-encoding
+                  // Low bitrate files are already optimized; re-encoding will enlarge them
+                  if (sourceBitrateMbps < 2.0) {
+                      // Low bitrate + needs resize = file already optimized, skip re-encoding
+                      Log.i("MediaAssetsUtils - Video Compress", "")
+                      Log.i("MediaAssetsUtils - Video Compress", "❌ DECISION: SKIP COMPRESSION")
+                      Log.i("MediaAssetsUtils - Video Compress", "  Reasons:")
+                      Log.i("MediaAssetsUtils - Video Compress", "    • Resize needed: ${originalWidth}x${originalHeight} exceeds ${quality.value}px limit")
+                      Log.i("MediaAssetsUtils - Video Compress", "    • BUT source bitrate is very low: ${String.format("%.2f", sourceBitrateMbps)}Mbps")
+                      Log.i("MediaAssetsUtils - Video Compress", "    • Re-encoding will enlarge file (overhead > size reduction)")
+                      Log.i("MediaAssetsUtils - Video Compress", "  → Returning original file (size: ${fileSizeInMB.toInt()}MB)")
                       mediaMetadataRetriever.release()
                       result.success(path)
                       return
                   } else {
-                      // Needs resize or large file - use calculated bitrate (minimum 2 Mbps)
-                      Log.i("MediaAssetsUtils - Video Compress", "✓ LOW SOURCE BITRATE: ${sourceBitrateMbps}Mbps, ${originalWidth}x${originalHeight}→${width}x${height}, using calculated ${calculatedBitrate}Mbps")
+                      // High bitrate + needs resize = compress with calculated bitrate
+                      Log.i("MediaAssetsUtils - Video Compress", "")
+                      Log.i("MediaAssetsUtils - Video Compress", "✅ DECISION: COMPRESS (resize required)")
+                      Log.i("MediaAssetsUtils - Video Compress", "  Reasons:")
+                      Log.i("MediaAssetsUtils - Video Compress", "    • Resize needed: ${originalWidth}x${originalHeight} exceeds ${quality.value}px limit")
+                      Log.i("MediaAssetsUtils - Video Compress", "    • Target dimensions: ${width}x${height}")
+                      Log.i("MediaAssetsUtils - Video Compress", "    • Source bitrate is moderate/high: ${String.format("%.2f", sourceBitrateMbps)}Mbps")
+                      Log.i("MediaAssetsUtils - Video Compress", "  → Using calculated bitrate for output: ${calculatedBitrate}Mbps")
                   }
-              } else if (needsResize) {
-                  // Resizing - always use calculated bitrate based on OUTPUT dimensions
-                  // Don't cap to source - smaller dimensions need appropriate bitrate
-                  Log.i("MediaAssetsUtils - Video Compress", "✓ RESIZING: ${originalWidth}x${originalHeight}→${width}x${height}, source ${sourceBitrateMbps}Mbps, using calculated ${calculatedBitrate}Mbps for output")
+              } else if (sourceBitrateMbps >= 5.0) {
+                  // HIGH bitrate - compress to optimize file size
+                  Log.i("MediaAssetsUtils - Video Compress", "")
+                  Log.i("MediaAssetsUtils - Video Compress", "✅ DECISION: COMPRESS (high bitrate)")
+                  Log.i("MediaAssetsUtils - Video Compress", "  Reasons:")
+                  Log.i("MediaAssetsUtils - Video Compress", "    • Source bitrate is high: ${String.format("%.2f", sourceBitrateMbps)}Mbps >= 5Mbps threshold")
+                  Log.i("MediaAssetsUtils - Video Compress", "    • File is large: ${fileSizeInMB.toInt()}MB")
+                  Log.i("MediaAssetsUtils - Video Compress", "  → Using calculated bitrate: ${calculatedBitrate}Mbps (will reduce file size)")
               } else {
-                  // No resize - cap to source bitrate to avoid making file larger
-                  if (calculatedBitrate > sourceBitrateMbps) {
-                      val cappedBitrate = Math.round(sourceBitrateMbps).toInt().coerceAtLeast(2)
-                      Log.i("MediaAssetsUtils - Video Compress", "⚠️ CAPPING: No resize, calculated (${calculatedBitrate}Mbps) > source (${sourceBitrateMbps}Mbps), using ${cappedBitrate}Mbps")
-                      calculatedBitrate = cappedBitrate
-                  } else {
-                      Log.i("MediaAssetsUtils - Video Compress", "✓ NO RESIZE: Using calculated ${calculatedBitrate}Mbps (source was ${sourceBitrateMbps}Mbps)")
-                  }
+                  // Moderate bitrate (2-5 Mbps) - skip, file is already reasonably optimized
+                  Log.i("MediaAssetsUtils - Video Compress", "")
+                  Log.i("MediaAssetsUtils - Video Compress", "❌ DECISION: SKIP COMPRESSION")
+                  Log.i("MediaAssetsUtils - Video Compress", "  Reasons:")
+                  Log.i("MediaAssetsUtils - Video Compress", "    • Source bitrate is moderate: ${String.format("%.2f", sourceBitrateMbps)}Mbps (2-5 range)")
+                  Log.i("MediaAssetsUtils - Video Compress", "    • File is already reasonably optimized, no resize needed")
+                  Log.i("MediaAssetsUtils - Video Compress", "  → Returning original file")
+                  mediaMetadataRetriever.release()
+                  result.success(path)
+                  return
               }
 
-              Log.i("MediaAssetsUtils - Video Compress", "✅ FINAL: Output ${width}x${height} @ ${calculatedBitrate}Mbps, estimated time: ${(fileSizeInMB * 0.8).toInt()}-${(fileSizeInMB * 1.2).toInt()}s")
+              Log.i("MediaAssetsUtils - Video Compress", "")
+              Log.i("MediaAssetsUtils - Video Compress", "COMPRESSION PARAMETERS:")
+              Log.i("MediaAssetsUtils - Video Compress", "  Output: ${width}x${height}px @ ${calculatedBitrate}Mbps")
+              Log.i("MediaAssetsUtils - Video Compress", "  Estimated duration: ~${(fileSizeInMB * 0.8).toInt()}-${(fileSizeInMB * 1.2).toInt()}s")
+              Log.i("MediaAssetsUtils - Video Compress", "")
 
               mediaMetadataRetriever.release()
 

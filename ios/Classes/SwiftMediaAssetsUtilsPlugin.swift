@@ -320,9 +320,23 @@ public class SwiftMediaAssetsUtilsPlugin: NSObject, FlutterPlugin {
         let destination = URL(fileURLWithPath: outputPath)
         createDirectory(destination.deletingLastPathComponent())
         
+        // Check if file format is MP4-compatible
+        let fileExtension = source.pathExtension.lowercased()
+        let mp4CompatibleFormats = ["mp4", "m4v"]
+        let isMP4Compatible = mp4CompatibleFormats.contains(fileExtension)
+        
         let asset = AVURLAsset(url: source)
         guard let videoTrack = asset.tracks(withMediaType: AVMediaType.video).first else {
             completion(.onFailure(CompressionError(title: "Cannot find video track.")))
+            return
+        }
+        
+        // FILE FORMAT CHECK: Always compress non-MP4 formats for player compatibility
+        if !isMP4Compatible {
+            print("FILE FORMAT CHECK: File format '\(fileExtension)' is not MP4-compatible. Will compress to MP4 format.")
+            // Force compression to convert to MP4
+            let configuredDestination = destination.deletingPathExtension().appendingPathExtension("mp4")
+            compressWithConfiguration(source: source, destination: configuredDestination, quality: quality, compressionId: compressionId, completion: completion)
             return
         }
         
@@ -355,6 +369,37 @@ public class SwiftMediaAssetsUtilsPlugin: NSObject, FlutterPlugin {
             }
         }
         
+        // Proceed with normal MP4 compression
+        compressWithConfiguration(source: source, destination: destination, quality: quality, compressionId: compressionId, videoWidth: width, videoHeight: height, completion: completion)
+    }
+    
+    private func compressWithConfiguration(source: URL, destination: URL, quality: VideoQuality, compressionId: String, videoWidth: CGFloat = 0, videoHeight: CGFloat = 0, completion: @escaping (CompressionResult) -> ()) {
+        var width = videoWidth
+        var height = videoHeight
+        
+        // Calculate dimensions if not provided
+        if width == 0 || height == 0 {
+            let asset = AVURLAsset(url: source)
+            if let videoTrack = asset.tracks(withMediaType: AVMediaType.video).first {
+                let videoSize = videoTrack.naturalSize
+                width = abs(videoSize.width)
+                height = abs(videoSize.height)
+                
+                if width >= quality.value || height >= quality.value {
+                    if (width > height) {
+                        height = height * quality.value / width
+                        width = quality.value
+                    } else if (height > width) {
+                        width = width * quality.value / height
+                        height = quality.value
+                    } else {
+                        width = quality.value
+                        height = quality.value
+                    }
+                }
+            }
+        }
+        
         // Store the compression operation for this compression ID
         let compression = self.compressor.compressVideo(source: source, destination: destination, progressQueue: .main, progressHandler: { [weak self] progress in
             DispatchQueue.main.async {
@@ -374,8 +419,8 @@ public class SwiftMediaAssetsUtilsPlugin: NSObject, FlutterPlugin {
         
         // Store the compression object
         compressions[compressionId] = compression
-        
     }
+
     
     func getThumbnailImage(url: URL) -> UIImage? {
         let asset: AVURLAsset = AVURLAsset.init(url: url)
