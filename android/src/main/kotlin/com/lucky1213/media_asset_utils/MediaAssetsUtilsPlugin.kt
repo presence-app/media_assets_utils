@@ -52,6 +52,9 @@ class MediaAssetsUtilsPlugin: FlutterPlugin, MethodCallHandler {
   /// when the Flutter Engine is detached from the Activity
   private lateinit var channel : MethodChannel
   private lateinit var applicationContext : Context
+  
+  // Track multiple concurrent compressions
+  private val activeCompressions = mutableMapOf<String, Boolean>() // compressionId -> isCancelled
 
   override fun onAttachedToEngine(flutterPluginBinding: FlutterPlugin.FlutterPluginBinding) {
     applicationContext = flutterPluginBinding.applicationContext
@@ -63,6 +66,11 @@ class MediaAssetsUtilsPlugin: FlutterPlugin, MethodCallHandler {
     Log.i("MediaAssetsUtils", "onMethodCall: ${call.method} ${call.arguments}")
       when (call.method) {
           "compressVideo" -> {
+              val compressionId = call.argument<String>("compressionId") ?: return
+              
+              // Register this compression as active
+              activeCompressions[compressionId] = false
+              
               val path = call.argument<String>("path")!!
               val customBitRate = call.argument<Int>("customBitRate") ?: 5
               val quality = VideoOutputQuality.valueOf(call.argument<String>("quality")?.uppercase() ?: "MEDIUM")
@@ -208,7 +216,10 @@ class MediaAssetsUtilsPlugin: FlutterPlugin, MethodCallHandler {
                       // Update UI with progress value
                       Handler(Looper.getMainLooper()).post {
                           Log.i("MediaAssetsUtils - onVideoCompressProgress", percent.toString())
-                          channel.invokeMethod("onVideoCompressProgress", if (percent > 100) { 100 } else { percent})
+                          channel.invokeMethod("onVideoCompressProgress", mapOf(
+                              "compressionId" to compressionId,
+                              "progress" to (if (percent > 100) 100 else percent)
+                          ))
                       }
                   }
 
@@ -217,6 +228,14 @@ class MediaAssetsUtilsPlugin: FlutterPlugin, MethodCallHandler {
                   }
 
                   override fun onSuccess(index: Int, size: Long, path: String?) {
+                      // Check if cancellation was requested before continuing
+                      if (activeCompressions[compressionId] == true) {
+                          Handler(Looper.getMainLooper()).post {
+                              result.error("MediaAssetsUtils - VideoCompress", "The transcoding operation was canceled.", null)
+                          }
+                          activeCompressions.remove(compressionId)
+                          return
+                      }
 
                       thread {
                           try {
@@ -246,20 +265,33 @@ class MediaAssetsUtilsPlugin: FlutterPlugin, MethodCallHandler {
                               if (saveToLibrary) {
                                   MediaStoreUtils.insert(applicationContext, outFile)
                               }
+                              activeCompressions.remove(compressionId)
 
                           } catch (e: Exception) {
                               Handler(Looper.getMainLooper()).post {
                                   result.error("VideoCompress", e.message, null)
                               }
+                              activeCompressions.remove(compressionId)
                           }
                       }
                   }
 
                   override fun onFailure(index: Int, failureMessage: String) {
+                      activeCompressions.remove(compressionId)
                       result.error("MediaAssetsUtils - VideoCompress", failureMessage, null)
                   }
 
                   override fun onCancelled(index: Int) {
+                      // Clean up temporary files on cancellation
+                      if (outFile.exists()) {
+                          try {
+                              outFile.delete()
+                              Log.i("MediaAssetsUtils - VideoCompress", "Cleaned up temporary file: ${outFile.path}")
+                          } catch (e: Exception) {
+                              Log.e("MediaAssetsUtils - VideoCompress", "Failed to delete temporary file: ${e.message}")
+                          }
+                      }
+                      activeCompressions.remove(compressionId)
                       Handler(Looper.getMainLooper()).post {
                           result.error("MediaAssetsUtils - VideoCompress", "The transcoding operation was canceled.", null)
                       }
@@ -400,6 +432,18 @@ class MediaAssetsUtilsPlugin: FlutterPlugin, MethodCallHandler {
                           result.error("SaveToGallery", e.message, null)
                       }
                   }
+              }
+          }
+          "cancelVideoCompression" -> {
+              val compressionId = call.argument<String>("compressionId") ?: return
+              if (activeCompressions.containsKey(compressionId)) {
+                  // Mark this compression as cancelled
+                  activeCompressions[compressionId] = true
+                  // Cancel all ongoing compressions via VideoCompressor
+                  VideoCompressor.cancel()
+                  result.success(true)
+              } else {
+                  result.success(false)
               }
           }
           // "saveImageToGallery" -> {

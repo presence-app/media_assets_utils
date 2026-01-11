@@ -3,6 +3,7 @@ import 'dart:io';
 import 'dart:math';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:media_asset_utils/media_asset_utils.dart';
 import 'package:media_asset_utils_example/permission_utils.dart';
 import 'package:path_provider/path_provider.dart';
@@ -22,6 +23,9 @@ class _MyAppState extends State<MyApp> {
   File? file;
   int? outputFileSize;
   int? fileSize;
+  double _compressionProgress = 0;
+  bool _isCompressing = false;
+  String? _activeCompressionId;
 
   @override
   void initState() {
@@ -122,30 +126,131 @@ class _MyAppState extends State<MyApp> {
                 ),
               ),
               TextButton(
-                onPressed: () async {
-                  await initCompress(_, RequestType.video);
-                  if (file == null) return;
-                  print("COMPRESS FILE ${file!.path}");
-                  // COMPRESS WITH LIGHTCOMPRESS OR FFMPEG
-                  // FFmpeg is faster but the decode cause issue on android playback
-                  // lightCompressor is very slow on android.
-                  outputFile = await MediaAssetUtils.compressVideo(
-                    file!,
-                    customBitRate: 5,
-                    saveToLibrary: false, //true,
-                    // high is 720p, very_high is 1080p
-                    quality: VideoQuality.high, // VideoQuality.medium
-                    thumbnailConfig: ThumbnailConfig(),
-                    onVideoCompressProgress: (double progress) {
-                      print(progress);
-                    },
-                  );
-                  setState(() {
-                    if (outputFile != null) outputFileSize = outputFile!.lengthSync();
-                  });
-                },
+                onPressed: _isCompressing
+                    ? null
+                    : () async {
+                        await initCompress(_, RequestType.video);
+                        if (file == null) return;
+                        print("COMPRESS FILE ${file!.path}");
+
+                        setState(() {
+                          _isCompressing = true;
+                          _compressionProgress = 0;
+                        });
+
+                        try {
+                          // COMPRESS WITH LIGHTCOMPRESS OR FFMPEG
+                          // FFmpeg is faster but the decode cause issue on android playback
+                          // lightCompressor is very slow on android.
+                          outputFile = await MediaAssetUtils.compressVideo(
+                            file!,
+                            customBitRate: 5,
+                            saveToLibrary: false, //true,
+                            // high is 720p, very_high is 1080p
+                            quality: VideoQuality.high, // VideoQuality.medium
+                            thumbnailConfig: ThumbnailConfig(),
+                            onVideoCompressProgress: (double progress) {
+                              print(progress);
+                              setState(() {
+                                _compressionProgress = progress;
+                              });
+                            },
+                            onCompressionIdGenerated: (String id) {
+                              setState(() {
+                                _activeCompressionId = id;
+                              });
+                            },
+                          );
+
+                          if (mounted) {
+                            setState(() {
+                              if (outputFile != null)
+                                outputFileSize = outputFile!.lengthSync();
+                              _isCompressing = false;
+                              _activeCompressionId = null;
+                            });
+                          }
+                        } on PlatformException catch (e) {
+                          // Check if this is a cancellation (expected behavior)
+                          if (e.message != null &&
+                              e.message!.contains("canceled")) {
+                            print("Compression was cancelled by user");
+                            if (mounted) {
+                              setState(() {
+                                _isCompressing = false;
+                                _activeCompressionId = null;
+                                _compressionProgress = 0;
+                              });
+                            }
+                          } else {
+                            // This is an unexpected error
+                            print("Compression error: $e");
+                            if (mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                    content: Text(
+                                        'Compression error: ${e.message}')),
+                              );
+                              setState(() {
+                                _isCompressing = false;
+                                _activeCompressionId = null;
+                              });
+                            }
+                          }
+                        } catch (e) {
+                          print("Compression error: $e");
+                          if (mounted) {
+                            setState(() {
+                              _isCompressing = false;
+                              _activeCompressionId = null;
+                            });
+                          }
+                        }
+                      },
                 child: Text('Compress Video'),
               ),
+              if (_isCompressing)
+                Container(
+                  padding: EdgeInsets.all(16),
+                  child: Column(
+                    children: [
+                      LinearProgressIndicator(
+                          value: _compressionProgress / 100),
+                      SizedBox(height: 8),
+                      Text(
+                          'Compression Progress: ${_compressionProgress.toStringAsFixed(1)}%'),
+                      SizedBox(height: 12),
+                      ElevatedButton.icon(
+                        onPressed: () async {
+                          if (_activeCompressionId != null) {
+                            final cancelled =
+                                await MediaAssetUtils.cancelVideoCompression(
+                                    _activeCompressionId!);
+                            if (cancelled) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                    content: Text('Compression cancelled')),
+                              );
+                            }
+                            if (mounted) {
+                              setState(() {
+                                _isCompressing = false;
+                                _activeCompressionId = null;
+                                _compressionProgress = 0;
+                              });
+                            }
+                          }
+                        },
+                        icon: Icon(Icons.cancel),
+                        label: Text('Cancel Compression'),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.red,
+                          foregroundColor: Colors.white,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
               TextButton(
                 onPressed: () async {
                   if (file == null) return;

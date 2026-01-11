@@ -26,6 +26,11 @@ public class Compression {
     public init() {}
 
     public var cancel = false
+    
+    deinit {
+        // Clean up when compression is deallocated
+        cancel = true
+    }
 }
 
 // Compression Error Messages
@@ -243,6 +248,15 @@ public struct LightCompressor {
 
                                 audioWriterInput.requestMediaDataWhenReady(on: processingQueue, using: {() -> Void in
                                     while audioWriterInput.isReadyForMoreMediaData {
+                                        // Check for cancellation during audio processing
+                                        if compressionOperation.cancel {
+                                            audioReader?.cancelReading()
+                                            audioWriterInput.markAsFinished()
+                                            videoWriter.cancelWriting()
+                                            completion(.onCancelled)
+                                            return
+                                        }
+                                        
                                         let sampleBuffer: CMSampleBuffer? = audioReaderOutput?.copyNextSampleBuffer()
                                         if audioReader?.status == .reading && sampleBuffer != nil {
                                             if isFirstBuffer {

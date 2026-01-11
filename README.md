@@ -150,6 +150,31 @@ print('Compressed: ${inputMB.toStringAsFixed(1)}MB → ${outputMB.toStringAsFixe
 // Example output: "Compressed: 31.0MB → 16.7MB (46.1% smaller)"
 ```
 
+### Cancel Compression
+
+You can cancel an ongoing compression and automatically clean up resources:
+
+```dart
+String? compressionId;
+
+// Start compression and capture the ID
+final compressedFile = await MediaAssetUtils.compressVideo(
+  videoFile,
+  quality: VideoQuality.high,
+  onCompressionIdGenerated: (id) {
+    compressionId = id; // Save ID for later cancellation
+  },
+  onVideoCompressProgress: (progress) {
+    print('Progress: $progress%');
+  },
+);
+
+// Cancel compression if needed
+if (userPressedCancelButton) {
+  await MediaAssetUtils.cancelVideoCompression(compressionId!);
+}
+```
+
 ### Quality Options
 
 ```dart

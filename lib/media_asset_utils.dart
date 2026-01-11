@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
 
 import 'package:flutter/services.dart';
 
@@ -19,7 +20,6 @@ enum VideoQuality {
   very_high,
 }
 
-
 class ThumbnailConfig {
   final int quality;
   final File? file;
@@ -35,7 +35,14 @@ class MediaAssetUtils {
   static MethodChannel _channel = const MethodChannel('media_asset_utils')
     ..setMethodCallHandler(_methodCallHandler);
 
-  static void Function(double)? _onVideoCompressProgress;
+  // Track progress callbacks for each compression by ID
+  static final Map<String, void Function(double)> _progressCallbacks = {};
+
+  // Track all active compression IDs
+  static final Set<String> _activeCompressions = {};
+
+  // Track the last compression ID for easy access
+  static String? _lastCompressionId;
 
   static Future<T?> _invokeMethod<T>(String method, [dynamic arguments]) async {
     try {
@@ -47,6 +54,7 @@ class MediaAssetUtils {
   }
 
   /// Method supports two compression plugin lightCompressor
+  /// Returns a compression ID that can be used to cancel this specific compression
   static Future<File?> compressVideo(
     File file, {
     String? videoName,
@@ -54,6 +62,7 @@ class MediaAssetUtils {
     bool saveToLibrary = false,
     VideoQuality quality = VideoQuality.very_low,
     void Function(double)? onVideoCompressProgress,
+    void Function(String)? onCompressionIdGenerated,
     ThumbnailConfig? thumbnailConfig,
   }) async {
     try {
@@ -61,30 +70,55 @@ class MediaAssetUtils {
 
       final str = quality.toString();
       final qstr = str.substring(str.indexOf('.') + 1);
-      _onVideoCompressProgress = onVideoCompressProgress;
-      final String? outputPath = await _invokeMethod('compressVideo', {
-        'path': file.path,
-        'videoName': videoName,
-        'saveToLibrary': saveToLibrary,
-        'quality': qstr.toUpperCase(),
-        'customBitRate': customBitRate,
-        'storeThumbnail': thumbnailConfig != null,
-        'thumbnailSaveToLibrary': thumbnailConfig?.saveToLibrary ?? false,
-        'thumbnailPath': thumbnailConfig?.file?.path,
-        'thumbnailQuality': thumbnailConfig?.quality ?? 100,
-      });
-      print('Time elapsed for compressing file with lightCompressor '
-          '${DateTime.timestamp().difference(startTime).inMilliseconds}ms');
-      print("Compression: initial File size: ${file.lengthSync()}");
-      if (outputPath != null) print("Compression: compressed File size: ${File(outputPath).lengthSync()}");
-      _onVideoCompressProgress = null;
-      return outputPath == null ? null : File(outputPath);
 
+      // Generate a unique compression ID for this operation
+      final compressionId = DateTime.now().millisecondsSinceEpoch.toString() +
+          '_${Random().nextInt(100000)}';
+
+      // Store this as the last compression ID and notify caller
+      _lastCompressionId = compressionId;
+      onCompressionIdGenerated?.call(compressionId);
+
+      // Store progress callback for this compression
+      if (onVideoCompressProgress != null) {
+        _progressCallbacks[compressionId] = onVideoCompressProgress;
+      }
+      _activeCompressions.add(compressionId);
+
+      try {
+        final String? outputPath = await _invokeMethod('compressVideo', {
+          'path': file.path,
+          'videoName': videoName,
+          'saveToLibrary': saveToLibrary,
+          'quality': qstr.toUpperCase(),
+          'customBitRate': customBitRate,
+          'storeThumbnail': thumbnailConfig != null,
+          'thumbnailSaveToLibrary': thumbnailConfig?.saveToLibrary ?? false,
+          'thumbnailPath': thumbnailConfig?.file?.path,
+          'thumbnailQuality': thumbnailConfig?.quality ?? 100,
+          'compressionId': compressionId,
+        });
+        print('Time elapsed for compressing file with lightCompressor '
+            '${DateTime.timestamp().difference(startTime).inMilliseconds}ms');
+        print("Compression: initial File size: ${file.lengthSync()}");
+        if (outputPath != null)
+          print(
+              "Compression: compressed File size: ${File(outputPath).lengthSync()}");
+
+        // Clean up this compression's resources
+        _progressCallbacks.remove(compressionId);
+        _activeCompressions.remove(compressionId);
+
+        return outputPath == null ? null : File(outputPath);
+      } catch (e) {
+        // Clean up on error
+        _progressCallbacks.remove(compressionId);
+        _activeCompressions.remove(compressionId);
+        rethrow;
+      }
     } on PlatformException {
-      _onVideoCompressProgress = null;
       rethrow;
     }
-
   }
 
   static Future<File?> compressImage(
@@ -152,15 +186,64 @@ class MediaAssetUtils {
   }
 
   static Future<void> _methodCallHandler(MethodCall call) {
-    //print(
-    //  "MediaAssetsUtils:onMethodCall(method: ${call.method}, arguments: ${call.arguments})",);
     final args = call.arguments;
     switch (call.method) {
       case 'onVideoCompressProgress':
-        _onVideoCompressProgress?.call(args);
+        // args contains {compressionId: String, progress: double}
+        if (args is Map) {
+          final compressionId = args['compressionId'] as String?;
+          final progress = args['progress'] as double?;
+
+          if (compressionId != null && progress != null) {
+            final callback = _progressCallbacks[compressionId];
+            callback?.call(progress);
+          }
+        }
         break;
       default:
     }
     return Future.value();
+  }
+
+  /// Cancel a specific video compression by its compression ID
+  /// Returns true if cancellation was successful, false if compression ID not found
+  static Future<bool> cancelVideoCompression(String compressionId) async {
+    if (!_activeCompressions.contains(compressionId)) {
+      return false;
+    }
+
+    try {
+      final result = await _invokeMethod<bool>('cancelVideoCompression', {
+        'compressionId': compressionId,
+      });
+      // Clean up regardless of result
+      _progressCallbacks.remove(compressionId);
+      _activeCompressions.remove(compressionId);
+      return result ?? false;
+    } on PlatformException {
+      // Still clean up on error
+      _progressCallbacks.remove(compressionId);
+      _activeCompressions.remove(compressionId);
+      rethrow;
+    }
+  }
+
+  /// Get all active compression IDs (useful for debugging)
+  static List<String> getActiveCompressions() {
+    return List.from(_activeCompressions);
+  }
+
+  /// Get the last compression ID that was started
+  /// Useful if you didn't use the onCompressionIdGenerated callback
+  static String? getLastCompressionId() {
+    return _lastCompressionId;
+  }
+
+  /// Cancel all active compressions
+  static Future<void> cancelAllCompressions() async {
+    final ids = List.from(_activeCompressions);
+    for (final id in ids) {
+      await cancelVideoCompression(id);
+    }
   }
 }
