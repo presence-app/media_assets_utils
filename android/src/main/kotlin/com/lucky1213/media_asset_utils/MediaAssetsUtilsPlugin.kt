@@ -85,12 +85,7 @@ class MediaAssetsUtilsPlugin: FlutterPlugin, MethodCallHandler {
               val thumbnailSaveToLibrary = call.argument<Boolean>("thumbnailSaveToLibrary") ?: false
               val thumbnailPath = call.argument<String>("thumbnailPath")
               val thumbnailQuality = call.argument<Int>("thumbnailQuality") ?: 100
-              // Skip files smaller than 5MB
-              if (file.length() < 5242880) {
-                  Log.i("MediaAssetsUtils - Video Compress", "File size (${file.length()}) < 5MB, returning original")
-                  result.success(path)
-                  return
-              }
+              
               val mediaMetadataRetriever = MediaMetadataRetriever()
               try {
                   mediaMetadataRetriever.setDataSource(path)
@@ -117,13 +112,6 @@ class MediaAssetsUtilsPlugin: FlutterPlugin, MethodCallHandler {
               Log.i("MediaAssetsUtils - Video Compress", "  Target Quality: ${quality.name} (max side: ${quality.value}px)")
               Log.i("MediaAssetsUtils - Video Compress", "  Custom Bitrate Cap: ${customBitRate}Mbps")
 
-              // Skip very small files - already optimized
-              if (fileSizeInMB < 5) {
-                  Log.i("MediaAssetsUtils - Video Compress", "SKIP: File size ${fileSizeInMB.toInt()}MB < 5MB threshold - returning original")
-                  result.success(path)
-                  return
-              }
-
               // Check file extension - always compress if not MP4 compatible format
               val fileExtension = file.extension.lowercase()
               val mp4CompatibleFormats = setOf("mp4", "m4v")
@@ -142,6 +130,13 @@ class MediaAssetsUtilsPlugin: FlutterPlugin, MethodCallHandler {
                   Log.i("MediaAssetsUtils - Video Compress", "")
                   Log.i("MediaAssetsUtils - Video Compress", "FILE FORMAT CHECK:")
                   Log.i("MediaAssetsUtils - Video Compress", "  Current format: .${fileExtension} (MP4 compatible ✓)")
+                  
+                  // Skip very small MP4-compatible files - already optimized
+                  if (fileSizeInMB < 7) {
+                      Log.i("MediaAssetsUtils - Video Compress", "SKIP: File size ${fileSizeInMB.toInt()}MB < 7MB threshold (MP4-compatible) - returning original")
+                      result.success(path)
+                      return
+                  }
               }
 
               // Calculate output dimensions
