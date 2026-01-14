@@ -320,6 +320,10 @@ public class SwiftMediaAssetsUtilsPlugin: NSObject, FlutterPlugin {
         let destination = URL(fileURLWithPath: outputPath)
         createDirectory(destination.deletingLastPathComponent())
         
+        // Register this compression ID immediately to avoid race conditions
+        let placeholderCompression = Compression()
+        compressions[compressionId] = placeholderCompression
+        
         // Check if file format is MP4-compatible
         let fileExtension = source.pathExtension.lowercased()
         let mp4CompatibleFormats = ["mp4", "m4v"]
@@ -336,12 +340,13 @@ public class SwiftMediaAssetsUtilsPlugin: NSObject, FlutterPlugin {
             print("FILE FORMAT CHECK: File format '\(fileExtension)' is not MP4-compatible. Will compress to MP4 format.")
             // Force compression to convert to MP4
             let configuredDestination = destination.deletingPathExtension().appendingPathExtension("mp4")
-            compressWithConfiguration(source: source, destination: configuredDestination, quality: quality, compressionId: compressionId, completion: completion)
+            compressWithConfiguration(source: source, destination: configuredDestination, quality: quality, compressionId: compressionId, completion: completion, skipDictionarySetup: true)
             return
         }
         
-        // 文件小于1M
-        if (videoTrack.totalSampleDataLength < 1048576) {
+        // Only skip compression for files that are ALREADY in MP4/M4V format
+        // Skip files smaller than 7MB (only if already MP4-compatible)
+        if isMP4Compatible && (videoTrack.totalSampleDataLength < 7340032) {
             completion(.onSuccess(source))
             return
         }
@@ -351,8 +356,8 @@ public class SwiftMediaAssetsUtilsPlugin: NSObject, FlutterPlugin {
         var width = abs(videoSize.width)
         var height = abs(videoSize.height)
         
-        // 码率小于164kb/s
-        if (bitrate < 1351680) {
+        // Skip low bitrate files < 2.0Mbps (only if already MP4-compatible)
+        if isMP4Compatible && (bitrate < 2000000) {
             completion(.onSuccess(source))
             return
         }
@@ -370,10 +375,10 @@ public class SwiftMediaAssetsUtilsPlugin: NSObject, FlutterPlugin {
         }
         
         // Proceed with normal MP4 compression
-        compressWithConfiguration(source: source, destination: destination, quality: quality, compressionId: compressionId, videoWidth: width, videoHeight: height, completion: completion)
+        compressWithConfiguration(source: source, destination: destination, quality: quality, compressionId: compressionId, videoWidth: width, videoHeight: height, completion: completion, skipDictionarySetup: true)
     }
     
-    private func compressWithConfiguration(source: URL, destination: URL, quality: VideoQuality, compressionId: String, videoWidth: CGFloat = 0, videoHeight: CGFloat = 0, completion: @escaping (CompressionResult) -> ()) {
+    private func compressWithConfiguration(source: URL, destination: URL, quality: VideoQuality, compressionId: String, videoWidth: CGFloat = 0, videoHeight: CGFloat = 0, completion: @escaping (CompressionResult) -> (), skipDictionarySetup: Bool = false) {
         var width = videoWidth
         var height = videoHeight
         
@@ -400,6 +405,14 @@ public class SwiftMediaAssetsUtilsPlugin: NSObject, FlutterPlugin {
             }
         }
         
+        // Create a placeholder compression object first to avoid race condition
+        // This ensures the compressionId exists in the dictionary before the completion callback
+        // Skip if already set up by the calling function
+        if !skipDictionarySetup {
+            let placeholderCompression = Compression()
+            compressions[compressionId] = placeholderCompression
+        }
+        
         // Store the compression operation for this compression ID
         let compression = self.compressor.compressVideo(source: source, destination: destination, progressQueue: .main, progressHandler: { [weak self] progress in
             DispatchQueue.main.async {
@@ -411,13 +424,12 @@ public class SwiftMediaAssetsUtilsPlugin: NSObject, FlutterPlugin {
             }
         }, configuration: Configuration(
             quality: quality, isMinBitRateEnabled: false, keepOriginalResolution: false, videoHeight: Int(height), videoWidth: Int(width), videoBitrate: Int(width * height * 25 * 0.07)
-        ), completion: { [weak self] result in
-            // Clean up compression reference after completion
-            self?.compressions.removeValue(forKey: compressionId)
+        ), completion: { result in
+            // Don't remove from dictionary here - let the outer completion handler do it
             completion(result)
         })
         
-        // Store the compression object
+        // Update with the actual compression object
         compressions[compressionId] = compression
     }
 
