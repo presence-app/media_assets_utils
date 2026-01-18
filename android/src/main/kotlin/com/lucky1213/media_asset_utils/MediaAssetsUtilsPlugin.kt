@@ -56,6 +56,12 @@ class MediaAssetsUtilsPlugin: FlutterPlugin, MethodCallHandler {
   
   // Track multiple concurrent compressions
   private val activeCompressions = mutableMapOf<String, Boolean>() // compressionId -> isCancelled
+  
+  // Track last progress update to throttle callbacks (optimization)
+  private val lastProgressUpdate = mutableMapOf<String, Float>() // compressionId -> lastProgress
+  
+  // Track compression start times for duration calculation
+  private val compressionStartTime = mutableMapOf<String, Long>() // compressionId -> startTimeMillis
 
   override fun onAttachedToEngine(flutterPluginBinding: FlutterPlugin.FlutterPluginBinding) {
     applicationContext = flutterPluginBinding.applicationContext
@@ -75,7 +81,6 @@ class MediaAssetsUtilsPlugin: FlutterPlugin, MethodCallHandler {
               val path = call.argument<String>("path")!!
               val customBitRate = call.argument<Int>("customBitRate") ?: 5
               val quality = VideoOutputQuality.valueOf(call.argument<String>("quality")?.uppercase() ?: "MEDIUM")
-              Log.i("MediaAssetsUtils - Video Compress", "🔧 Parameters: customBitRate=${customBitRate}Mbps, quality=${quality.name}")
               val tempPath = call.argument<String>("outputPath")
               val outputPath = tempPath ?: MediaStoreUtils.generateTempPath(applicationContext, DirectoryType.MOVIES.value, ".mp4")
               val outFile = File(outputPath)
@@ -106,7 +111,7 @@ class MediaAssetsUtilsPlugin: FlutterPlugin, MethodCallHandler {
               val fileSize = file.length()
               val fileSizeInMB = fileSize / 1048576.0
 
-              Log.i("MediaAssetsUtils - Video Compress", " INPUT FILE INFO:")
+              Log.i("MediaAssetsUtils - Video Compress", "📥 INPUT FILE INFO:")
               Log.i("MediaAssetsUtils - Video Compress", "  Size: ${fileSizeInMB.toInt()}MB (${fileSizeInMB}MB)")
               Log.i("MediaAssetsUtils - Video Compress", "  Dimensions: ${width}x${height}")
               Log.i("MediaAssetsUtils - Video Compress", "  Bitrate: ${bitrate}bps")
@@ -120,21 +125,21 @@ class MediaAssetsUtilsPlugin: FlutterPlugin, MethodCallHandler {
               
               if (!isMP4Compatible) {
                   Log.i("MediaAssetsUtils - Video Compress", "")
-                  Log.i("MediaAssetsUtils - Video Compress", "FILE FORMAT CHECK:")
+                  Log.i("MediaAssetsUtils - Video Compress", "📋 FILE FORMAT CHECK:")
                   Log.i("MediaAssetsUtils - Video Compress", "  Current format: .${fileExtension} (not MP4 compatible)")
                   Log.i("MediaAssetsUtils - Video Compress", "  Compatible formats: ${mp4CompatibleFormats.joinToString(", ") { ".$it" }}")
                   Log.i("MediaAssetsUtils - Video Compress", "")
-                  Log.i("MediaAssetsUtils - Video Compress", "DECISION: COMPRESS (format conversion)")
+                  Log.i("MediaAssetsUtils - Video Compress", "✅ DECISION: COMPRESS (format conversion)")
                   Log.i("MediaAssetsUtils - Video Compress", "  Reason: Video must be converted to MP4 for player compatibility")
                   Log.i("MediaAssetsUtils - Video Compress", "  → Will output as MP4 format")
               } else {
                   Log.i("MediaAssetsUtils - Video Compress", "")
-                  Log.i("MediaAssetsUtils - Video Compress", "FILE FORMAT CHECK:")
+                  Log.i("MediaAssetsUtils - Video Compress", "📋 FILE FORMAT CHECK:")
                   Log.i("MediaAssetsUtils - Video Compress", "  Current format: .${fileExtension} (MP4 compatible ✓)")
                   
                   // Skip very small MP4-compatible files - already optimized
                   if (fileSizeInMB < 7) {
-                      Log.i("MediaAssetsUtils - Video Compress", "SKIP: File size ${fileSizeInMB.toInt()}MB < 7MB threshold (MP4-compatible) - returning original")
+                      Log.i("MediaAssetsUtils - Video Compress", "❌ SKIP: File size ${fileSizeInMB.toInt()}MB < 7MB threshold (MP4-compatible) - returning original")
                       result.success(path)
                       return
                   }
@@ -170,7 +175,7 @@ class MediaAssetsUtilsPlugin: FlutterPlugin, MethodCallHandler {
               val outputPixels = width * height
               var calculatedBitrate = Math.round((outputPixels * 3.5) / 1_000_000).toInt().coerceIn(2, customBitRate)
 
-              Log.i("MediaAssetsUtils - Video Compress", "BITRATE CALCULATION:")
+              Log.i("MediaAssetsUtils - Video Compress", "🔢 BITRATE CALCULATION:")
               Log.i("MediaAssetsUtils - Video Compress", "  Output size: ${width}x${height} (${outputPixels} pixels)")
               Log.i("MediaAssetsUtils - Video Compress", "  Formula: (${outputPixels} × 3.5) / 1,000,000 = ${(outputPixels * 3.5 / 1_000_000).toInt()}Mbps")
               Log.i("MediaAssetsUtils - Video Compress", "  Calculated bitrate: ${calculatedBitrate}Mbps (capped to custom: ${customBitRate}Mbps)")
@@ -178,7 +183,7 @@ class MediaAssetsUtilsPlugin: FlutterPlugin, MethodCallHandler {
               // CRITICAL: Intelligent bitrate management
               val sourceBitrateMbps = bitrate / 1_000_000.0  // Keep as double to avoid truncation!
               Log.i("MediaAssetsUtils - Video Compress", "")
-              Log.i("MediaAssetsUtils - Video Compress", "COMPRESSION DECISION LOGIC:")
+              Log.i("MediaAssetsUtils - Video Compress", "🧠 COMPRESSION DECISION LOGIC:")
               Log.i("MediaAssetsUtils - Video Compress", "  Source bitrate: ${String.format("%.2f", sourceBitrateMbps)}Mbps")
               Log.i("MediaAssetsUtils - Video Compress", "  Resize needed: $needsResize (current ${originalWidth}x${originalHeight} vs quality max ${quality.value}px)")
               Log.i("MediaAssetsUtils - Video Compress", "  File size: ${fileSizeInMB.toInt()}MB")
@@ -246,7 +251,7 @@ class MediaAssetsUtilsPlugin: FlutterPlugin, MethodCallHandler {
               }
 
               Log.i("MediaAssetsUtils - Video Compress", "")
-              Log.i("MediaAssetsUtils - Video Compress", "COMPRESSION PARAMETERS:")
+              Log.i("MediaAssetsUtils - Video Compress", "⚙️ COMPRESSION PARAMETERS:")
               Log.i("MediaAssetsUtils - Video Compress", "  Output: ${width}x${height}px @ ${calculatedBitrate}Mbps")
               Log.i("MediaAssetsUtils - Video Compress", "  Estimated duration: ~${(fileSizeInMB * 0.8).toInt()}-${(fileSizeInMB * 1.2).toInt()}s")
               Log.i("MediaAssetsUtils - Video Compress", "")
@@ -258,6 +263,11 @@ class MediaAssetsUtilsPlugin: FlutterPlugin, MethodCallHandler {
               }
 
               Log.i("MediaAssetsUtils - outFile", outFile.path)
+              // Initialize progress tracking for throttling
+              lastProgressUpdate[compressionId] = 0f
+              // Record compression start time
+              compressionStartTime[compressionId] = System.currentTimeMillis()
+              
               VideoCompressor.start(
                   context = applicationContext, // => This is required
                   uris =  listOf(Uri.fromFile(file)),
@@ -279,13 +289,19 @@ class MediaAssetsUtilsPlugin: FlutterPlugin, MethodCallHandler {
                     ),
                 listener = object : CompressionListener {
                   override fun onProgress(index: Int, percent: Float) {
-                      // Update UI with progress value
-                      Handler(Looper.getMainLooper()).post {
-                          Log.i("MediaAssetsUtils - onVideoCompressProgress", percent.toString())
-                          channel.invokeMethod("onVideoCompressProgress", mapOf(
-                              "compressionId" to compressionId,
-                              "progress" to (if (percent > 100) 100 else percent)
-                          ))
+                      // OPTIMIZATION: Throttle progress callbacks - only update every 2%
+                      val lastProgress = lastProgressUpdate[compressionId] ?: 0f
+                      val progressDelta = percent - lastProgress
+                      
+                      // Send update if: 1% change, >99% (near completion), or at 100%
+                      if (progressDelta >= 1.0f || percent >= 100f) {
+                          lastProgressUpdate[compressionId] = percent
+                          Handler(Looper.getMainLooper()).post {
+                              channel.invokeMethod("onVideoCompressProgress", mapOf(
+                                  "compressionId" to compressionId,
+                                  "progress" to (if (percent > 100) 100 else percent)
+                              ))
+                          }
                       }
                   }
 
@@ -300,9 +316,12 @@ class MediaAssetsUtilsPlugin: FlutterPlugin, MethodCallHandler {
                               result.error("MediaAssetsUtils - VideoCompress", "The transcoding operation was canceled.", null)
                           }
                           activeCompressions.remove(compressionId)
+                          lastProgressUpdate.remove(compressionId)
+                          compressionStartTime.remove(compressionId)
                           return
                       }
 
+                      // OPTIMIZATION: Use background thread for file I/O operations
                       thread {
                           try {
                               val tempFile = File(path!!)
@@ -312,13 +331,15 @@ class MediaAssetsUtilsPlugin: FlutterPlugin, MethodCallHandler {
                               val inputSizeMB = file.length() / 1048576.0
                               val outputSizeMB = outFile.length() / 1048576.0
                               val reduction = ((inputSizeMB - outputSizeMB) / inputSizeMB * 100)
-                              val compressionTime = (System.currentTimeMillis() - 0) / 1000.0 // Approximate
+                              val compressionTimeMs = System.currentTimeMillis() - (compressionStartTime[compressionId] ?: System.currentTimeMillis())
+                              val compressionTimeSec = compressionTimeMs / 1000.0
 
                               // Log comprehensive summary
                               Log.i("MediaAssetsUtils - COMPRESSION SUMMARY", "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
                               Log.i("MediaAssetsUtils - COMPRESSION SUMMARY", "Input:  ${inputSizeMB.toInt()}MB @ ${bitrate}bps (${originalWidth}x${originalHeight})")
                               Log.i("MediaAssetsUtils - COMPRESSION SUMMARY", "Output: ${outputSizeMB.toInt()}MB @ ${calculatedBitrate}Mbps (${width}x${height})")
                               Log.i("MediaAssetsUtils - COMPRESSION SUMMARY", "Reduction: ${reduction.toInt()}% (saved ${(inputSizeMB - outputSizeMB).toInt()}MB)")
+                              Log.i("MediaAssetsUtils - COMPRESSION SUMMARY", "Duration: ${compressionTimeSec.toInt()}s (${String.format("%.1f", compressionTimeSec)}s)")
                               Log.i("MediaAssetsUtils - COMPRESSION SUMMARY", "Quality: ${quality.name}, Bitrate formula: 3.5x")
                               Log.i("MediaAssetsUtils - COMPRESSION SUMMARY", "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 
@@ -332,18 +353,24 @@ class MediaAssetsUtilsPlugin: FlutterPlugin, MethodCallHandler {
                                   MediaStoreUtils.insert(applicationContext, outFile)
                               }
                               activeCompressions.remove(compressionId)
+                              lastProgressUpdate.remove(compressionId)
+                              compressionStartTime.remove(compressionId)
 
                           } catch (e: Exception) {
                               Handler(Looper.getMainLooper()).post {
                                   result.error("VideoCompress", e.message, null)
                               }
                               activeCompressions.remove(compressionId)
+                              lastProgressUpdate.remove(compressionId)
+                              compressionStartTime.remove(compressionId)
                           }
                       }
                   }
 
                   override fun onFailure(index: Int, failureMessage: String) {
                       activeCompressions.remove(compressionId)
+                      lastProgressUpdate.remove(compressionId)
+                      compressionStartTime.remove(compressionId)
                       result.error("MediaAssetsUtils - VideoCompress", failureMessage, null)
                   }
 
@@ -358,6 +385,8 @@ class MediaAssetsUtilsPlugin: FlutterPlugin, MethodCallHandler {
                           }
                       }
                       activeCompressions.remove(compressionId)
+                      lastProgressUpdate.remove(compressionId)
+                      compressionStartTime.remove(compressionId)
                       Handler(Looper.getMainLooper()).post {
                           result.error("MediaAssetsUtils - VideoCompress", "The transcoding operation was canceled.", null)
                       }

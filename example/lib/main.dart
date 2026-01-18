@@ -150,7 +150,8 @@ class _MyAppState extends State<MyApp> {
                             quality: VideoQuality.high, // VideoQuality.medium
                             thumbnailConfig: ThumbnailConfig(),
                             onVideoCompressProgress: (double progress) {
-                              print(progress);
+                              print(
+                                  'Compression progress: ${progress.toStringAsFixed(1)}%');
                               setState(() {
                                 _compressionProgress = progress;
                               });
