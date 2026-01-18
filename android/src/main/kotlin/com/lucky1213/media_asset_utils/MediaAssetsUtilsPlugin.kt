@@ -2,6 +2,7 @@ package com.lucky1213.media_asset_utils
 
 import android.content.Context
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.media.ExifInterface
 import android.media.MediaMetadataRetriever
 import android.net.Uri
@@ -376,6 +377,8 @@ class MediaAssetsUtilsPlugin: FlutterPlugin, MethodCallHandler {
               if (!outputFile.parentFile!!.exists()) {
                   outputFile.parentFile!!.mkdirs()
               }
+              
+              // Luban 1.1.8 - Using Builder API with callback
               Luban.with(applicationContext)
                       .load(srcFile)
                       .ignoreBy(0)
@@ -444,20 +447,33 @@ class MediaAssetsUtilsPlugin: FlutterPlugin, MethodCallHandler {
           "getImageInfo" -> {
               val path = call.argument<String>("path")!!
               val file = File(path)
-              val exifInterface = ExifInterface(file.absolutePath)
               val filesize = file.length()
-              var width: Int?
-              var height: Int?
-              val orientation: Int?
+              var width: Int? = 0
+              var height: Int? = 0
+              var orientation: Int? = ExifInterface.ORIENTATION_NORMAL
+              
+              // Try to read EXIF data first (works for JPEG, some PNG)
               try {
+                  val exifInterface = ExifInterface(file.absolutePath)
                   width = exifInterface.getAttributeInt(ExifInterface.TAG_IMAGE_WIDTH, 0)
                   height = exifInterface.getAttributeInt(ExifInterface.TAG_IMAGE_LENGTH, 0)
                   orientation = exifInterface.getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL)
-
                   if (orientation == ExifInterface.ORIENTATION_TRANSPOSE || orientation == ExifInterface.ORIENTATION_ROTATE_90 || orientation == ExifInterface.ORIENTATION_TRANSVERSE || orientation == ExifInterface.ORIENTATION_ROTATE_270) {
                       val temp = width
                       width = height
                       height = temp
+                  }
+              } catch (_: IOException) {
+              }
+
+              // Fallback to BitmapFactory if EXIF didn't provide dimensions (e.g., GIF files)
+              try {
+                  if (width == 0 || height == 0) {
+                      val opts = BitmapFactory.Options()
+                      opts.inJustDecodeBounds = true
+                      BitmapFactory.decodeFile(path, opts)
+                      width = opts.outWidth
+                      height = opts.outHeight
                   }
                   val json = JSONObject()
 
