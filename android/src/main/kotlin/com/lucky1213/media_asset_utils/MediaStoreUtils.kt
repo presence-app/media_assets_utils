@@ -156,7 +156,7 @@ class MediaStoreUtils {
         private fun getMimeType(file: File): String? {
             val type: String?
             val extension = getFileExtension(file)
-            type = MimeTypeMap.getSingleton().getMimeTypeFromExtension(extension.toLowerCase())
+            type = MimeTypeMap.getSingleton().getMimeTypeFromExtension(extension.lowercase())
 
             if (type == null) {
                 if (extension == "jpg" || extension == "jpeg") {

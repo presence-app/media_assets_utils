@@ -9,10 +9,11 @@ This library works on Android and iOS.
 ## Platform Requirements
 
 **Android**: API 24+ (Android 7.0+)
-- Gradle 8.9+
+- Gradle 8.11.1+
 - Java 21
 - Kotlin 1.9.25
-- Android Gradle Plugin 8.7.3
+- Android Gradle Plugin 8.9.1
+- Compile SDK 36
 
 **iOS**: 12.0+
 
@@ -53,6 +54,40 @@ The plugin uses **bulletproof compression logic** optimized for mobile:
 
 See [COMPRESSION_CONFIG.md](COMPRESSION_CONFIG.md) for detailed technical documentation.
 
+## Platform Implementation
+
+### Android
+Android leverages **two external libraries** for media compression:
+
+- **Video Compression**: [LightCompressor](https://github.com/presence-app/LightCompressor) (maintained fork)
+  - Uses Android's MediaCodec API for hardware-accelerated encoding
+  - Version: 1.3.5
+  - Forked from archived [AbedElazizShe/LightCompressor](https://github.com/AbedElazizShe/LightCompressor)
+  - Published via JitPack: `com.github.presence-app:LightCompressor:1.3.5`
+
+- **Image Compression**: [Luban](https://github.com/Curzibn/Luban)
+  - WeChat Moments compression algorithm
+  - Version: 1.1.8 (stable callback API)
+  - Published via JitPack: `com.github.Curzibn:Luban:1.1.8`
+  - Note: Luban 2.0.1 available but requires migration to coroutines API
+
+### iOS
+iOS uses **custom Swift implementations** with no external dependencies:
+
+- **Video Compression**: `LightCompressor.swift`
+  - Custom implementation using AVFoundation
+  - Built specifically for this plugin
+  - Similar API to Android for consistency
+
+- **Image Compression**: `Lubannie.swift`
+  - Custom Swift implementation
+  - Mirrors Luban compression strategy
+  - Uses UIKit and Core Graphics
+
+**Why different approaches?**
+- **Android**: Mature libraries available via Gradle, well-maintained
+- **iOS**: Custom implementations provide full control and zero dependencies beyond native frameworks
+
 ## Configuration
 
 ### Android
@@ -64,7 +99,7 @@ The library requires **Kotlin 1.9.25** and **Java 21**. Update your project-leve
 buildscript {
     ext.kotlin_version = '1.9.25'
     dependencies {
-        classpath 'com.android.tools.build:gradle:8.7.3'
+        classpath 'com.android.tools.build:gradle:8.9.1'
         classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlin_version"
     }
 }
@@ -74,14 +109,14 @@ buildscript {
 ```gradle
 plugins {
     id "dev.flutter.flutter-plugin-loader" version "1.0.0"
-    id "com.android.application" version "8.7.3" apply false
+    id "com.android.application" version "8.9.1" apply false
     id "org.jetbrains.kotlin.android" version "1.9.25" apply false
 }
 ```
 
 **android/gradle/wrapper/gradle-wrapper.properties**:
 ```properties
-distributionUrl=https\://services.gradle.org/distributions/gradle-8.9-all.zip
+distributionUrl=https\://services.gradle.org/distributions/gradle-8.11.1-all.zip
 ```
 
 Add the following permissions to AndroidManifest.xml:
