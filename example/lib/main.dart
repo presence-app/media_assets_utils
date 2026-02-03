@@ -8,6 +8,7 @@ import 'package:media_asset_utils/media_asset_utils.dart';
 import 'package:media_asset_utils_example/permission_utils.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:wechat_assets_picker/wechat_assets_picker.dart';
+import 'package:video_player/video_player.dart';
 
 void main() {
   runApp(MyApp());
@@ -119,9 +120,9 @@ class _MyAppState extends State<MyApp> {
                 child: Column(
                   children: [
                     Text(
-                        '当前选择: $file, 文件大小: ${fileSize != null ? (fileSize! / 1024 / 1024).toStringAsFixed(2) : 0}'),
+                        'Selected: $file, File size: ${fileSize != null ? (fileSize! / 1024 / 1024).toStringAsFixed(2) : 0} MB'),
                     Text(
-                        '处理后: $outputFile, 文件大小: ${outputFileSize != null ? (outputFileSize! / 1024 / 1024).toStringAsFixed(2) : 0}'),
+                        'Output: $outputFile, File size: ${outputFileSize != null ? (outputFileSize! / 1024 / 1024).toStringAsFixed(2) : 0} MB'),
                   ],
                 ),
               ),
@@ -131,14 +132,50 @@ class _MyAppState extends State<MyApp> {
                     : () async {
                         await initCompress(_, RequestType.video);
                         if (file == null) return;
-                        print("COMPRESS FILE ${file!.path}");
+
+                        print(
+                            "═══════════════════════════════════════════════════");
+                        print("🎬 VIDEO COMPRESSION STARTED");
+                        print(
+                            "═══════════════════════════════════════════════════");
+
+                        // Get video info before compression
+                        try {
+                          final videoInfo =
+                              await MediaAssetUtils.getVideoInfo(file!);
+                          print("📄 INPUT FILE INFO:");
+                          print("  • Path: ${file!.path}");
+                          print("  • File exists: ${file!.existsSync()}");
+                          print(
+                              "  • File size: ${(file!.lengthSync() / 1024 / 1024).toStringAsFixed(2)} MB");
+                          print("  • Video info: ${videoInfo.toJson()}");
+                          print("  • Width: ${videoInfo.width}");
+                          print("  • Height: ${videoInfo.height}");
+                          print("  • Duration: ${videoInfo.duration}ms");
+                          if (videoInfo.filesize != null) {
+                            print(
+                                "  • Filesize from metadata: ${(videoInfo.filesize! / 1024 / 1024).toStringAsFixed(2)} MB");
+                          }
+                        } catch (e) {
+                          print("⚠️ Could not get video info: $e");
+                        }
+
+                        print("\n⚙️ COMPRESSION PARAMETERS:");
+                        print("  • Quality: VideoQuality.high (720p)");
+                        print("  • Custom bitrate: 5 Mbps");
+                        print("  • Save to library: false");
+                        print("  • Output path: ${outputFile?.path}");
 
                         setState(() {
                           _isCompressing = true;
                           _compressionProgress = 0;
                         });
 
+                        final startTime = DateTime.now();
+
                         try {
+                          print("\n🔄 Starting compression...\n");
+
                           // COMPRESS WITH LIGHTCOMPRESS OR FFMPEG
                           // FFmpeg is faster but the decode cause issue on android playback
                           // lightCompressor is very slow on android.
@@ -146,22 +183,65 @@ class _MyAppState extends State<MyApp> {
                             file!,
                             customBitRate: 5,
                             saveToLibrary: false, //true,
-                            // high is 720p, very_high is 1080p
-                            quality: VideoQuality.high, // VideoQuality.medium
+                            // high is 720p (will resize from 1920 to 1280), very_high is 1080p
+                            quality: VideoQuality.high,
                             thumbnailConfig: ThumbnailConfig(),
                             onVideoCompressProgress: (double progress) {
                               print(
-                                  'Compression progress: ${progress.toStringAsFixed(1)}%');
+                                  '📊 Compression progress: ${progress.toStringAsFixed(1)}%');
                               setState(() {
                                 _compressionProgress = progress;
                               });
                             },
                             onCompressionIdGenerated: (String id) {
+                              print("🆔 Compression ID generated: $id");
                               setState(() {
                                 _activeCompressionId = id;
                               });
                             },
                           );
+
+                          final endTime = DateTime.now();
+                          final duration = endTime.difference(startTime);
+
+                          if (outputFile != null) {
+                            print(
+                                "\n═══════════════════════════════════════════════════");
+                            print("✅ COMPRESSION SUCCESSFUL");
+                            print(
+                                "═══════════════════════════════════════════════════");
+                            print("📤 OUTPUT FILE INFO:");
+                            print("  • Path: ${outputFile!.path}");
+                            print(
+                                "  • File exists: ${outputFile!.existsSync()}");
+                            print(
+                                "  • File size: ${(outputFile!.lengthSync() / 1024 / 1024).toStringAsFixed(2)} MB");
+                            print(
+                                "  • Original size: ${(file!.lengthSync() / 1024 / 1024).toStringAsFixed(2)} MB");
+                            final reduction = ((file!.lengthSync() -
+                                    outputFile!.lengthSync()) /
+                                file!.lengthSync() *
+                                100);
+                            print(
+                                "  • Size reduction: ${reduction.toStringAsFixed(1)}%");
+                            print(
+                                "  • Duration: ${duration.inSeconds}s (${duration.inMinutes}m ${duration.inSeconds % 60}s)");
+                            print(
+                                "═══════════════════════════════════════════════════\n");
+
+                            // Try to get output video info
+                            try {
+                              final outputInfo =
+                                  await MediaAssetUtils.getVideoInfo(
+                                      outputFile!);
+                              print("📹 OUTPUT VIDEO INFO:");
+                              print("  • ${outputInfo.toJson()}");
+                            } catch (e) {
+                              print("⚠️ Could not get output video info: $e");
+                            }
+                          } else {
+                            print("\n⚠️ Compression returned null output file");
+                          }
 
                           if (mounted) {
                             setState(() {
@@ -172,10 +252,27 @@ class _MyAppState extends State<MyApp> {
                             });
                           }
                         } on PlatformException catch (e) {
+                          final endTime = DateTime.now();
+                          final duration = endTime.difference(startTime);
+
+                          print(
+                              "\n═══════════════════════════════════════════════════");
+                          print("❌ PLATFORM EXCEPTION");
+                          print(
+                              "═══════════════════════════════════════════════════");
+                          print("  • Code: ${e.code}");
+                          print("  • Message: ${e.message}");
+                          print("  • Details: ${e.details}");
+                          print("  • Stack trace: ${e.stacktrace}");
+                          print(
+                              "  • Duration before error: ${duration.inSeconds}s");
+                          print(
+                              "═══════════════════════════════════════════════════\n");
+
                           // Check if this is a cancellation (expected behavior)
                           if (e.message != null &&
                               e.message!.contains("canceled")) {
-                            print("Compression was cancelled by user");
+                            print("ℹ️ Compression was cancelled by user");
                             if (mounted) {
                               setState(() {
                                 _isCompressing = false;
@@ -185,7 +282,7 @@ class _MyAppState extends State<MyApp> {
                             }
                           } else {
                             // This is an unexpected error
-                            print("Compression error: $e");
+                            print("🚨 Unexpected compression error: $e");
                             if (mounted) {
                               ScaffoldMessenger.of(context).showSnackBar(
                                 SnackBar(
@@ -198,8 +295,23 @@ class _MyAppState extends State<MyApp> {
                               });
                             }
                           }
-                        } catch (e) {
-                          print("Compression error: $e");
+                        } catch (e, stackTrace) {
+                          final endTime = DateTime.now();
+                          final duration = endTime.difference(startTime);
+
+                          print(
+                              "\n═══════════════════════════════════════════════════");
+                          print("❌ GENERAL EXCEPTION");
+                          print(
+                              "═══════════════════════════════════════════════════");
+                          print("  • Error: $e");
+                          print("  • Type: ${e.runtimeType}");
+                          print(
+                              "  • Duration before error: ${duration.inSeconds}s");
+                          print("  • Stack trace:\n$stackTrace");
+                          print(
+                              "═══════════════════════════════════════════════════\n");
+
                           if (mounted) {
                             setState(() {
                               _isCompressing = false;
@@ -252,6 +364,27 @@ class _MyAppState extends State<MyApp> {
                     ],
                   ),
                 ),
+              if (outputFile != null &&
+                  outputFile!.existsSync() &&
+                  !_isCompressing)
+                Padding(
+                  padding: EdgeInsets.all(16),
+                  child: Builder(
+                    builder: (btnContext) => ElevatedButton.icon(
+                      onPressed: () {
+                        _showMediaOverlay(btnContext);
+                      },
+                      icon: Icon(Icons.play_circle_filled),
+                      label: Text('Open Compressed Media'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.green,
+                        foregroundColor: Colors.white,
+                        padding:
+                            EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                      ),
+                    ),
+                  ),
+                ),
               TextButton(
                 onPressed: () async {
                   if (file == null) return;
@@ -288,16 +421,88 @@ class _MyAppState extends State<MyApp> {
               TextButton(
                 onPressed: () async {
                   await initCompress(_, RequestType.image);
-                  print(outputFile);
-                  final result = await MediaAssetUtils.compressImage(
-                    file!,
-                    saveToLibrary: true,
-                    outputFile: outputFile,
-                  );
-                  print(result);
-                  setState(() {
-                    outputFileSize = outputFile!.lengthSync();
-                  });
+
+                  print(
+                      "\n═══════════════════════════════════════════════════");
+                  print("🖼️ IMAGE COMPRESSION STARTED");
+                  print("═══════════════════════════════════════════════════");
+
+                  try {
+                    final imageInfo = await MediaAssetUtils.getImageInfo(file!);
+                    print("📄 INPUT FILE INFO:");
+                    print("  • Path: ${file!.path}");
+                    print("  • File exists: ${file!.existsSync()}");
+                    print(
+                        "  • File size: ${(file!.lengthSync() / 1024 / 1024).toStringAsFixed(2)} MB");
+                    print("  • Image info: ${imageInfo.toJson()}");
+                    print("  • Width: ${imageInfo.width}");
+                    print("  • Height: ${imageInfo.height}");
+                  } catch (e) {
+                    print("⚠️ Could not get image info: $e");
+                  }
+
+                  print("\n⚙️ COMPRESSION PARAMETERS:");
+                  print("  • Save to library: true");
+                  print("  • Output path: ${outputFile?.path}");
+
+                  final startTime = DateTime.now();
+
+                  try {
+                    print("\n🔄 Starting compression...\n");
+
+                    final result = await MediaAssetUtils.compressImage(
+                      file!,
+                      saveToLibrary: true,
+                      outputFile: outputFile,
+                    );
+
+                    final endTime = DateTime.now();
+                    final duration = endTime.difference(startTime);
+
+                    print(
+                        "\n═══════════════════════════════════════════════════");
+                    print("✅ COMPRESSION SUCCESSFUL");
+                    print(
+                        "═══════════════════════════════════════════════════");
+                    print("📤 OUTPUT FILE INFO:");
+                    print("  • Result path: $result");
+                    if (outputFile != null && outputFile!.existsSync()) {
+                      print("  • File exists: ${outputFile!.existsSync()}");
+                      print(
+                          "  • File size: ${(outputFile!.lengthSync() / 1024 / 1024).toStringAsFixed(2)} MB");
+                      print(
+                          "  • Original size: ${(file!.lengthSync() / 1024 / 1024).toStringAsFixed(2)} MB");
+                      final reduction =
+                          ((file!.lengthSync() - outputFile!.lengthSync()) /
+                              file!.lengthSync() *
+                              100);
+                      print(
+                          "  • Size reduction: ${reduction.toStringAsFixed(1)}%");
+                    }
+                    print("  • Duration: ${duration.inMilliseconds}ms");
+                    print(
+                        "═══════════════════════════════════════════════════\n");
+
+                    setState(() {
+                      outputFileSize = outputFile!.lengthSync();
+                    });
+                  } catch (e, stackTrace) {
+                    final endTime = DateTime.now();
+                    final duration = endTime.difference(startTime);
+
+                    print(
+                        "\n═══════════════════════════════════════════════════");
+                    print("❌ COMPRESSION ERROR");
+                    print(
+                        "═══════════════════════════════════════════════════");
+                    print("  • Error: $e");
+                    print("  • Type: ${e.runtimeType}");
+                    print(
+                        "  • Duration before error: ${duration.inMilliseconds}ms");
+                    print("  • Stack trace:\n$stackTrace");
+                    print(
+                        "═══════════════════════════════════════════════════\n");
+                  }
                 },
                 child: Text('Compress Image'),
               ),
@@ -308,9 +513,121 @@ class _MyAppState extends State<MyApp> {
                 },
                 child: Text('Save To Media Store'),
               ),
+              if (outputFile != null && outputFile!.existsSync())
+                Builder(
+                  builder: (btnContext) => TextButton(
+                    onPressed: () {
+                      _showMediaOverlay(btnContext);
+                    },
+                    child: Text('Open Compressed Media'),
+                  ),
+                ),
             ],
           );
         }),
+      ),
+    );
+  }
+
+  void _showMediaOverlay(BuildContext context) {
+    final isVideo = outputFile!.path.toLowerCase().endsWith('.mp4') ||
+        outputFile!.path.toLowerCase().endsWith('.mov') ||
+        outputFile!.path.toLowerCase().endsWith('.m4v');
+
+    showDialog(
+      context: context,
+      barrierColor: Colors.black87,
+      builder: (context) => Dialog(
+        backgroundColor: Colors.transparent,
+        insetPadding: EdgeInsets.all(10),
+        child: Stack(
+          children: [
+            Center(
+              child: isVideo
+                  ? VideoPlayerWidget(videoFile: outputFile!)
+                  : Image.file(
+                      outputFile!,
+                      fit: BoxFit.contain,
+                    ),
+            ),
+            Positioned(
+              top: 40,
+              right: 20,
+              child: IconButton(
+                icon: Icon(Icons.close, color: Colors.white, size: 32),
+                onPressed: () => Navigator.of(context).pop(),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class VideoPlayerWidget extends StatefulWidget {
+  final File videoFile;
+
+  const VideoPlayerWidget({Key? key, required this.videoFile})
+      : super(key: key);
+
+  @override
+  _VideoPlayerWidgetState createState() => _VideoPlayerWidgetState();
+}
+
+class _VideoPlayerWidgetState extends State<VideoPlayerWidget> {
+  late VideoPlayerController _controller;
+  bool _isInitialized = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = VideoPlayerController.file(widget.videoFile)
+      ..initialize().then((_) {
+        setState(() {
+          _isInitialized = true;
+        });
+        _controller.play();
+        _controller.setLooping(true);
+      });
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (!_isInitialized) {
+      return Center(child: CircularProgressIndicator());
+    }
+
+    return AspectRatio(
+      aspectRatio: _controller.value.aspectRatio,
+      child: GestureDetector(
+        onTap: () {
+          setState(() {
+            if (_controller.value.isPlaying) {
+              _controller.pause();
+            } else {
+              _controller.play();
+            }
+          });
+        },
+        child: Stack(
+          alignment: Alignment.center,
+          children: [
+            VideoPlayer(_controller),
+            if (!_controller.value.isPlaying)
+              Icon(
+                Icons.play_circle_outline,
+                size: 80,
+                color: Colors.white.withOpacity(0.8),
+              ),
+          ],
+        ),
       ),
     );
   }

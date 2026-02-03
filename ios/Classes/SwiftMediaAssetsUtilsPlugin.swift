@@ -337,31 +337,59 @@ public class SwiftMediaAssetsUtilsPlugin: NSObject, FlutterPlugin {
         
         // FILE FORMAT CHECK: Always compress non-MP4 formats for player compatibility
         if !isMP4Compatible {
-            print("FILE FORMAT CHECK: File format '\(fileExtension)' is not MP4-compatible. Will compress to MP4 format.")
+            NSLog("iOS Video Compress: FILE FORMAT CHECK - '\(fileExtension)' is not MP4-compatible. Will compress to MP4 format.")
             // Force compression to convert to MP4
             let configuredDestination = destination.deletingPathExtension().appendingPathExtension("mp4")
             compressWithConfiguration(source: source, destination: configuredDestination, quality: quality, compressionId: compressionId, completion: completion, skipDictionarySetup: true)
             return
         }
         
+        // Get file info for decision making
+        let fileSize = (try? FileManager.default.attributesOfItem(atPath: source.path)[.size] as? UInt64) ?? 0
+        let fileSizeMB = Double(fileSize) / 1_048_576.0
+        
+        NSLog("iOS Video Compress: ═══════════════════════════════════════")
+        NSLog("iOS Video Compress: 📋 FILE INFO")
+        NSLog("iOS Video Compress: • File size: %.2f MB", fileSizeMB)
+        NSLog("iOS Video Compress: • Track data length: %.2f MB", Double(videoTrack.totalSampleDataLength) / 1_048_576.0)
+        NSLog("iOS Video Compress: • Format: .\(fileExtension) (MP4-compatible: \(isMP4Compatible))")
+        
         // Only skip compression for files that are ALREADY in MP4/M4V format
         // Skip files smaller than 7MB (only if already MP4-compatible)
-        if isMP4Compatible && (videoTrack.totalSampleDataLength < 7340032) {
+        if isMP4Compatible && fileSizeMB < 7.0 {
+            NSLog("iOS Video Compress: ❌ SKIP - File size %.2f MB < 7MB threshold (MP4-compatible) - returning original", fileSizeMB)
             completion(.onSuccess(source))
             return
         }
         
         let bitrate = videoTrack.estimatedDataRate
+        let bitrateMbps = bitrate / 1_000_000.0
         let videoSize = videoTrack.naturalSize
-        var width = abs(videoSize.width)
-        var height = abs(videoSize.height)
+        let originalWidth = abs(videoSize.width)
+        let originalHeight = abs(videoSize.height)
         
-        // Skip low bitrate files < 2.0Mbps (only if already MP4-compatible)
-        if isMP4Compatible && (bitrate < 2000000) {
+        var width = originalWidth
+        var height = originalHeight
+        
+        // Check if resize is needed
+        let needsResize = width > quality.value || height > quality.value
+        
+        NSLog("iOS Video Compress: 🔢 COMPRESSION DECISION LOGIC:")
+        NSLog("iOS Video Compress: • Source bitrate: %.2f Mbps", bitrateMbps)
+        NSLog("iOS Video Compress: • Dimensions: %dx%d", Int(originalWidth), Int(originalHeight))
+        NSLog("iOS Video Compress: • Quality target: %dpx", Int(quality.value))
+        NSLog("iOS Video Compress: • Needs resize: %@", needsResize ? "YES" : "NO")
+        
+        // CRITICAL: Match Android logic - Skip ONLY if low bitrate AND no resize needed
+        // This prevents skipping files that need resizing even if they have low bitrate
+        if isMP4Compatible && (bitrateMbps < 2.0) && !needsResize {
+            NSLog("iOS Video Compress: ❌ SKIP - Low bitrate (%.2f Mbps < 2Mbps) AND no resize needed - returning original", bitrateMbps)
             completion(.onSuccess(source))
             return
         }
-        if width >= quality.value || height >= quality.value {
+        
+        // Calculate output dimensions if resize is needed
+        if needsResize {
             if (width > height) {
                 height = height * quality.value / width
                 width = quality.value
@@ -372,6 +400,13 @@ public class SwiftMediaAssetsUtilsPlugin: NSObject, FlutterPlugin {
                 width = quality.value
                 height = quality.value
             }
+            NSLog("iOS Video Compress: ✅ COMPRESS - Will resize from %dx%d to %dx%d", Int(originalWidth), Int(originalHeight), Int(width), Int(height))
+        } else if bitrateMbps >= 5.0 {
+            NSLog("iOS Video Compress: ✅ COMPRESS - High bitrate (%.2f Mbps >= 5Mbps) - will optimize", bitrateMbps)
+        } else if bitrateMbps >= 2.0 && bitrateMbps < 5.0 {
+            NSLog("iOS Video Compress: ❌ SKIP - Moderate bitrate (%.2f Mbps in 2-5 range) and no resize - returning original", bitrateMbps)
+            completion(.onSuccess(source))
+            return
         }
         
         // Proceed with normal MP4 compression
