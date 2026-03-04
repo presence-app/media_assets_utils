@@ -271,7 +271,7 @@ class MediaAssetsUtilsPlugin: FlutterPlugin, MethodCallHandler {
               VideoCompressor.start(
                   context = applicationContext, // => This is required
                   uris =  listOf(Uri.fromFile(file)),
-                  isStreamable = false,
+                  isStreamable = true,
 
                   storageConfiguration = AppSpecificStorageConfiguration(
                       //  videoName = outFile.nameWithoutExtension,
